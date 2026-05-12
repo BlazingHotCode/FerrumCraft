@@ -37,7 +37,7 @@ refined as adjacent systems mature.
 - [x] JSON schema validation for every data/resource file type
 - [x] Data validation with useful missing/invalid resource errors
 - [x] Built-in `ferrumcraft` resource pack loaded by default
-- [ ] Stable save IDs use namespaced strings instead of runtime registry indexes
+- [x] Stable save IDs use namespaced strings instead of runtime registry indexes
 
 ## Phase 4 - Blocks And World Data
 - [x] Block registry populated from data/resource definitions

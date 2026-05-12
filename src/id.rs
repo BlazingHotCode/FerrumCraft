@@ -49,6 +49,19 @@ impl fmt::Display for NamespacedId {
     }
 }
 
+impl serde::Serialize for NamespacedId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for NamespacedId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 impl FromStr for NamespacedId {
     type Err = IdError;
 
@@ -173,5 +186,14 @@ mod tests {
     fn rejects_extra_separator() {
         let error = "a:b:c".parse::<NamespacedId>().unwrap_err();
         assert_eq!(error, IdError::TooManySeparators);
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        let id: NamespacedId = "ferrumcraft:stone".parse().unwrap();
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"ferrumcraft:stone\"");
+        let deserialized: NamespacedId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, deserialized);
     }
 }
