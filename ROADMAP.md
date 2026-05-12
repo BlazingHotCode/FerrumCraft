@@ -32,7 +32,7 @@ refined as adjacent systems mature.
 - [x] Language files for display names (`assets/<namespace>/lang/en_us.json`)
 - [x] Block model JSON files (`assets/<namespace>/models/block/*.json`)
 - [x] Item model JSON files (`assets/<namespace>/models/item/*.json`)
-- [ ] Blockstate JSON files for mapping block properties to models
+- [x] Blockstate JSON files for mapping block properties to models
 - [ ] Texture references in models (`assets/<namespace>/textures/...`)
 - [ ] Tags for grouping blocks/items (`data/<namespace>/tags/...`)
 - [ ] JSON schema validation for every data/resource file type

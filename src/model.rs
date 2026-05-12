@@ -144,6 +144,74 @@ fn load_single_item_model(
     Ok(ItemModel { parent_block })
 }
 
+/// A blockstate definition that maps a block to its default model.
+///
+/// In the future this will support property-based variant selection.
+#[derive(Clone, Debug)]
+pub struct BlockState {
+    /// Model path for the default variant, e.g. `"block/stone"`.
+    pub model: String,
+}
+
+/// Loads blockstate definitions for the given block paths.
+///
+/// Each blockstate file is loaded from `blockstates/<path>.json`.
+pub fn load_blockstates(
+    resources: &ResourceManager,
+    namespace: &str,
+    block_ids: &[NamespacedId],
+) -> Registry<BlockState> {
+    let mut reg = Registry::new();
+
+    for id in block_ids {
+        let filename = format!("{}.json", id.path());
+        match load_single_blockstate(resources, namespace, &filename) {
+            Ok(state) => reg.register(id.clone(), state),
+            Err(e) => {
+                log::warn!(target: "blockstates", "Failed to load blockstate for {id}: {e}");
+            }
+        }
+    }
+
+    reg
+}
+
+fn load_single_blockstate(
+    resources: &ResourceManager,
+    namespace: &str,
+    filename: &str,
+) -> Result<BlockState, ModelError> {
+    let file: BlockStateFile = resources
+        .read_json(namespace, ResourceCategory::Blockstate, filename)
+        .map_err(|e| ModelError::Load {
+            file: filename.to_string(),
+            detail: e.to_string(),
+        })?;
+
+    // Extract the model from the default variant.
+    let model = file
+        .variants
+        .get("")
+        .map(|v| v.model.clone())
+        .ok_or_else(|| ModelError::MissingTexture {
+            key: "default variant".to_string(),
+            file: filename.to_string(),
+        })?;
+
+    Ok(BlockState { model })
+}
+
+/// Raw JSON structure of a blockstate file.
+#[derive(Clone, Debug, Deserialize)]
+struct BlockStateFile {
+    variants: HashMap<String, BlockStateVariant>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct BlockStateVariant {
+    model: String,
+}
+
 fn load_single_model(
     resources: &ResourceManager,
     namespace: &str,

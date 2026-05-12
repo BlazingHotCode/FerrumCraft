@@ -308,6 +308,10 @@ fn main() {
     let item_models = model::load_item_models(&_resources, "ferrumcraft", &item_paths);
     log::info!(target: "models", "Loaded {} item models", item_models.len());
 
+    // Load blockstate definitions for each non-air block.
+    let blockstates = model::load_blockstates(&_resources, "ferrumcraft", &block_ids);
+    log::info!(target: "blockstates", "Loaded {} blockstate definitions", blockstates.len());
+
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
