@@ -23,6 +23,7 @@ mod resource;
 mod tag;
 mod window;
 mod world;
+mod worldgen;
 
 use std::time::{Duration, Instant};
 
@@ -59,6 +60,7 @@ struct App {
     renderer: Option<renderer::Renderer>,
     camera: Option<FirstPersonCamera>,
     world: world::World,
+    worldgen_feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
     font: Option<Font>,
     block_models: Option<crate::registry::Registry<model::BlockModel>>,
     input: InputState,
@@ -401,7 +403,9 @@ fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
     )
 }
 
-fn create_demo_world() -> world::World {
+fn create_demo_world(
+    feature_types: &crate::registry::Registry<worldgen::WorldgenFeatureType>,
+) -> world::World {
     let mut world = world::World::with_seed(DEMO_WORLD_SEED);
     let origin = world::ChunkPos(0, 0);
     world.load_chunk(origin);
@@ -420,28 +424,28 @@ fn create_demo_world() -> world::World {
             world.set_block(world::BlockPos(x, 1, z), id("grass_block"));
         }
     }
-    let far_pillar_height = world.seeded_range(38, 8, 1, 5, 8);
-    for y in 2..far_pillar_height {
-        world.set_block(world::BlockPos(38, y, 8), id("stone"));
-    }
-    for y in 2..5 {
-        world.set_block(world::BlockPos(2, y, 2), id("stone"));
-    }
-    for x in 12..15 {
-        world.set_block(world::BlockPos(x, 2, 2), id("stone"));
-        world.set_block(world::BlockPos(x, 3, 2), id("stone"));
-    }
-    for z in 2..5 {
-        world.set_block(world::BlockPos(12, 2, z), id("stone"));
-        world.set_block(world::BlockPos(12, 3, z), id("stone"));
-    }
-    for y in 2..5 {
-        world.set_block(world::BlockPos(14, y, 4), id("stone"));
-        world.set_block(world::BlockPos(13, y, 4), id("stone"));
-        world.set_block(world::BlockPos(14, y, 3), id("stone"));
-    }
-    world.set_block(world::BlockPos(13, 4, 2), id("stone"));
-    world.set_block(world::BlockPos(12, 4, 3), id("stone"));
+    let stone_column = worldgen::ConfiguredFeature {
+        feature_type: id::NamespacedId::ferrumcraft("block_column").expect("valid feature type ID"),
+        config: worldgen::FeatureConfig::BlockColumn {
+            block: id("stone"),
+            min_height: 5,
+            max_height: 8,
+            height_salt: 1,
+        },
+    };
+    worldgen::place_configured_feature(
+        feature_types,
+        &stone_column,
+        &mut world,
+        world::BlockPos(38, 2, 8),
+    );
+    worldgen::place_configured_feature(
+        feature_types,
+        &stone_column,
+        &mut world,
+        world::BlockPos(2, 2, 2),
+    );
+    place_ao_test_structure(&mut world, world::BlockPos(12, 2, 2));
     for x in 8..12 {
         let z = world.seeded_range(x, 6, 2, 3, 7);
         let height = world.seeded_range(x, z, 3, 2, 4);
@@ -469,15 +473,65 @@ fn create_demo_world() -> world::World {
             world.set_block(world::BlockPos(x, 1, z), id("water"));
         }
     }
-    world.set_block(world::BlockPos(5, 2, 5), id("oak_log"));
-    world.set_block(world::BlockPos(5, 3, 5), id("oak_log"));
-    world.set_block(world::BlockPos(4, 3, 5), id("oak_leaves"));
-    world.set_block(world::BlockPos(6, 3, 5), id("oak_leaves"));
-    world.set_block(world::BlockPos(5, 3, 4), id("oak_leaves"));
-    world.set_block(world::BlockPos(5, 3, 6), id("oak_leaves"));
-    world.set_block(world::BlockPos(5, 4, 5), id("oak_leaves"));
+    let oak_tree = worldgen::ConfiguredFeature {
+        feature_type: id::NamespacedId::ferrumcraft("tree").expect("valid feature type ID"),
+        config: worldgen::FeatureConfig::SimpleTree {
+            log: id("oak_log"),
+            leaves: id("oak_leaves"),
+            trunk_height: 2,
+        },
+    };
+    worldgen::place_configured_feature(
+        feature_types,
+        &oak_tree,
+        &mut world,
+        world::BlockPos(5, 2, 5),
+    );
 
     world
+}
+
+fn place_ao_test_structure(world: &mut world::World, origin: world::BlockPos) {
+    let stone = block::BlockId("stone".to_string());
+    for x in 0..3 {
+        world.set_block(
+            world::BlockPos(origin.0 + x, origin.1, origin.2),
+            stone.clone(),
+        );
+        world.set_block(
+            world::BlockPos(origin.0 + x, origin.1 + 1, origin.2),
+            stone.clone(),
+        );
+    }
+    for z in 0..3 {
+        world.set_block(
+            world::BlockPos(origin.0, origin.1, origin.2 + z),
+            stone.clone(),
+        );
+        world.set_block(
+            world::BlockPos(origin.0, origin.1 + 1, origin.2 + z),
+            stone.clone(),
+        );
+    }
+    for y in 0..3 {
+        world.set_block(
+            world::BlockPos(origin.0 + 2, origin.1 + y, origin.2 + 2),
+            stone.clone(),
+        );
+        world.set_block(
+            world::BlockPos(origin.0 + 1, origin.1 + y, origin.2 + 2),
+            stone.clone(),
+        );
+        world.set_block(
+            world::BlockPos(origin.0 + 2, origin.1 + y, origin.2 + 1),
+            stone.clone(),
+        );
+    }
+    world.set_block(
+        world::BlockPos(origin.0 + 1, origin.1 + 2, origin.2),
+        stone.clone(),
+    );
+    world.set_block(world::BlockPos(origin.0, origin.1 + 2, origin.2 + 1), stone);
 }
 
 fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
@@ -546,6 +600,11 @@ fn main() {
 
     let block_registry = block::register_core_blocks();
     log::info!(target: "blocks", "Registered {} core block types", block_registry.len());
+    let worldgen_feature_types = worldgen::register_core_feature_types();
+    log::info!(target: "worldgen", "Registered {} worldgen feature types", worldgen_feature_types.len());
+    for (id, feature_type) in worldgen_feature_types.iter() {
+        log::debug!(target: "worldgen", "Feature type {id}: {}", feature_type.name());
+    }
 
     // Log block component summary.
     let flammable_count = block_registry
@@ -613,7 +672,7 @@ fn main() {
     };
 
     // Create a demo world and place some blocks.
-    let mut world = create_demo_world();
+    let mut world = create_demo_world(&worldgen_feature_types);
     log::info!(target: "world", "Demo world seed: {}", world.seed());
     if let Some(def) = block_registry
         .iter()
@@ -646,6 +705,7 @@ fn main() {
         renderer: None,
         camera: None,
         world,
+        worldgen_feature_types,
         font: Some(font),
         block_models: Some(block_models),
         input: InputState::default(),

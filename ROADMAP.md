@@ -67,15 +67,18 @@ refined as adjacent systems mature.
 
 ## Phase 6 - Terrain Generation
 - [x] Deterministic world seed
-- [ ] Worldgen feature registry with namespaced string IDs
-- [ ] Data-driven feature JSON for trees, ores, lakes, flowers, and structures
-- [ ] Heightmap/noise terrain generation
-- [ ] Surface layering (grass, dirt, stone)
-- [ ] Sand near water and simple beaches
-- [ ] Trees with logs and leaves
-- [ ] Basic caves or ore pockets
-- [ ] Configurable ore generation by depth bands and biome tags
-- [ ] Spawn area generation around player
+- [x] Worldgen feature registry with namespaced string IDs
+- [ ] Noise settings for terrain shape (height, continentalness, erosion, peaks/valleys)
+- [ ] Biome source and biome map generation from seed/noise
+- [ ] Chunk noise population: stone terrain from height and density fields
+- [ ] Surface rules for biome top/filler blocks (grass, dirt, sand, stone)
+- [ ] Aquifers/sea level water filling for oceans, rivers, and lakes
+- [ ] Carvers for caves and ravines
+- [ ] Placed/configured feature pipeline for vegetation, ores, disks, and lakes
+- [ ] Ore placement using configured features, height ranges, and biome filters
+- [ ] Tree placement using configured features and biome filters
+- [ ] Structure set registry and simple structure placement hooks
+- [ ] Spawn area chunk generation around player
 - [ ] Async/incremental chunk loading around player
 - [ ] Chunk unload distance
 
