@@ -24,7 +24,7 @@ refined as adjacent systems mature.
 - [x] Free-fly world-axis movement (WASD horizontal, Space up, Shift down)
 
 ## Phase 3 - Data And Resource System
-- [ ] Namespaced string IDs (`ferrumcraft:stone`) for blocks, items, entities, recipes, loot tables, and tags
+- [x] Namespaced string IDs (`ferrumcraft:stone`) for blocks, items, entities, recipes, loot tables, and tags
 - [ ] Asset/resource directory layout inspired by Minecraft (`assets/<namespace>/...`, `data/<namespace>/...`)
 - [ ] Resource loader for JSON files and textures
 - [ ] Registry bootstrap order for blocks, items, entities, biomes, features, sounds, particles, screens, commands, and dimensions

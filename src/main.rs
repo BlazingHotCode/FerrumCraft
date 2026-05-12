@@ -6,6 +6,7 @@
 
 mod camera;
 mod debug;
+mod id;
 mod input;
 mod renderer;
 mod window;
