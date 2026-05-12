@@ -28,7 +28,7 @@ refined as adjacent systems mature.
 - [x] Namespaced string IDs (`ferrumcraft:stone`) for blocks, items, entities, recipes, loot tables, and tags
 - [x] Asset/resource directory layout inspired by Minecraft (`assets/<namespace>/...`, `data/<namespace>/...`)
 - [x] Resource loader for JSON files and textures
-- [ ] Registry bootstrap order for blocks, items, entities, biomes, features, sounds, particles, screens, commands, and dimensions
+- [x] Registry bootstrap order for blocks, items, entities, biomes, features, sounds, particles, screens, commands, and dimensions
 - [ ] Language files for display names (`assets/<namespace>/lang/en_us.json`)
 - [ ] Block model JSON files (`assets/<namespace>/models/block/*.json`)
 - [ ] Item model JSON files (`assets/<namespace>/models/item/*.json`)

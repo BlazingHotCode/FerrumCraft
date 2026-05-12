@@ -13,6 +13,7 @@ mod debug;
 mod id;
 mod input;
 mod logging;
+mod registry;
 mod renderer;
 mod resource;
 mod window;
