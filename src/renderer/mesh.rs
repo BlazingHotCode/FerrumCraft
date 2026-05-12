@@ -12,8 +12,8 @@ use super::material::Material;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    position: [f32; 3],
-    tint: [f32; 3],
+    pub position: [f32; 3],
+    pub tint: [f32; 3],
 }
 
 impl Vertex {
@@ -160,7 +160,7 @@ impl Mesh {
         )
     }
 
-    fn from_vertices(
+    pub fn from_vertices(
         device: &wgpu::Device,
         material_layout: &wgpu::BindGroupLayout,
         label: &str,

@@ -15,6 +15,7 @@ mod id;
 mod input;
 mod lang;
 mod logging;
+mod mesher;
 mod model;
 mod registry;
 mod renderer;
@@ -84,6 +85,11 @@ impl ApplicationHandler for App {
         self.window = Some(w);
         self.renderer = Some(renderer);
         self.camera = Some(camera);
+
+        // Build chunk meshes and replace debug shapes.
+        if let Some(ref mut renderer) = self.renderer {
+            build_chunk_meshes(renderer);
+        }
     }
 
     fn window_event(
@@ -257,6 +263,63 @@ impl App {
             window.set_pointer_locked(locked);
         }
     }
+}
+
+/// Creates a demo world, builds chunk meshes, and sets them on the renderer.
+fn build_chunk_meshes(renderer: &mut renderer::Renderer) {
+    // Create a demo world: a flat platform of grass with a few features.
+    let mut world = world::World::new();
+    let origin = world::ChunkPos(0, 0);
+    world.load_chunk(origin);
+
+    // Flat grass layer at y=0.
+    for x in 0..world::CHUNK_SIZE_X {
+        for z in 0..world::CHUNK_SIZE_Z {
+            world.set_block(world::BlockPos(x as i32, 0, z as i32), block::BlockId(3)); // dirt
+            world.set_block(world::BlockPos(x as i32, 1, z as i32), block::BlockId(2)); // grass
+        }
+    }
+    // A few features: stone pillar, sand patch, log.
+    for y in 2..5 {
+        world.set_block(world::BlockPos(2, y, 2), block::BlockId(1)); // stone pillar
+    }
+    for x in 10..14 {
+        for z in 10..14 {
+            world.set_block(world::BlockPos(x, 1, z), block::BlockId(4)); // sand
+        }
+    }
+    world.set_block(world::BlockPos(5, 2, 5), block::BlockId(6)); // log
+    world.set_block(world::BlockPos(5, 3, 5), block::BlockId(6)); // log
+    world.set_block(world::BlockPos(4, 3, 5), block::BlockId(7)); // leaves
+    world.set_block(world::BlockPos(6, 3, 5), block::BlockId(7));
+    world.set_block(world::BlockPos(5, 3, 4), block::BlockId(7));
+    world.set_block(world::BlockPos(5, 3, 6), block::BlockId(7));
+    world.set_block(world::BlockPos(5, 4, 5), block::BlockId(7));
+
+    // Mesh each chunk and build GPU meshes.
+    let material_layout = renderer.material_layout();
+    let device = &renderer.device;
+    let mut meshes = Vec::new();
+
+    for chunk in world.chunks() {
+        let data = mesher::mesh_chunk(chunk);
+        if data.vertices.is_empty() {
+            continue;
+        }
+
+        let mesh = renderer::Mesh::from_vertices(
+            device,
+            material_layout,
+            &format!("chunk_{}", chunk.pos().0),
+            [0.8, 0.85, 0.75, 1.0],
+            &data.vertices,
+            &data.indices,
+        );
+        meshes.push(mesh);
+    }
+
+    log::info!(target: "mesher", "Built {} chunk meshes from demo world", meshes.len());
+    renderer.set_chunk_meshes(meshes);
 }
 
 fn free_fly_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {

@@ -53,8 +53,8 @@ refined as adjacent systems mature.
 - [x] Dirty chunk tracking for remeshing and saving
 
 ## Phase 5 - Chunk Rendering
-- [ ] Naive block meshing (visible faces only)
-- [ ] Chunk vertex/index buffers
+- [x] Naive block meshing (visible faces only)
+- [x] Chunk vertex/index buffers
 - [ ] Texture atlas generated from model texture references
 - [ ] UV generation from JSON block models
 - [ ] Cube/block model renderer for parented models (e.g. `block/cube_all`, `block/cube_column`)

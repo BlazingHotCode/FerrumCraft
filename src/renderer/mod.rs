@@ -4,6 +4,7 @@
 //! pipelines. It coordinates frame acquisition and submission, while the
 //! submodules own scene data, mesh data, and render-pass encoding details.
 
+pub use mesh::{Mesh, Vertex};
 pub use overlay::Font;
 
 mod material;
@@ -101,6 +102,16 @@ impl Renderer {
     /// Updates the camera matrix used by the scene shader uniforms.
     pub fn set_view_projection(&mut self, view_projection: Mat4) {
         self.scene.set_view_projection(view_projection);
+    }
+
+    /// Bind group layout required for chunk mesh materials.
+    pub fn material_layout(&self) -> &wgpu::BindGroupLayout {
+        self.pipelines.material_layout()
+    }
+
+    /// Replaces the scene meshes with chunk meshes built from the provided data.
+    pub fn set_chunk_meshes(&mut self, meshes: Vec<Mesh>) {
+        self.scene.set_meshes(meshes);
     }
 
     /// Encodes and presents one frame.

@@ -60,4 +60,9 @@ impl Scene {
     pub fn meshes(&self) -> &[Mesh] {
         &self.meshes
     }
+
+    /// Replaces all scene meshes (e.g. when switching from debug shapes to chunks).
+    pub fn set_meshes(&mut self, meshes: Vec<Mesh>) {
+        self.meshes = meshes;
+    }
 }
