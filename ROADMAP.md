@@ -10,7 +10,7 @@ expanded.
 - [x] Renderer architecture cleanup (separate scene, mesh, and pipeline responsibilities)
 - [x] Basic static 3D renderer (vertex/index buffers, depth testing, perspective projection)
 - [x] Built-in debug shapes (triangle, cube, plane)
-- [ ] Event loop integration (resize, redraw, input plumbing)
+- [x] Event loop integration (resize, redraw, input plumbing)
 - [ ] Basic shaders + material/color pipeline
 
 ## Phase 2 — Camera & Controls

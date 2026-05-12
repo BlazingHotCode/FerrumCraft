@@ -4,9 +4,11 @@
 //! and renderer frame loop. Game state should move into dedicated modules as it
 //! grows; this file should stay focused on top-level orchestration.
 
+mod input;
 mod renderer;
 mod window;
 
+use input::InputState;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -19,6 +21,7 @@ use winit::event_loop::EventLoop;
 struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
+    input: InputState,
 }
 
 impl ApplicationHandler for App {
@@ -36,19 +39,39 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
+        window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        if window.id() != window_id {
+            return;
+        }
+
+        self.input.handle_window_event(&event);
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                 }
+                window.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                if let Some(renderer) = &self.renderer {
-                    renderer.render();
+                if let Some(renderer) = &mut self.renderer {
+                    match renderer.render() {
+                        Ok(()) => self.input.end_frame(),
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            let size = window.inner.inner_size();
+                            renderer.resize(size.width, size.height);
+                            window.request_redraw();
+                        }
+                        Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                        Err(wgpu::SurfaceError::Timeout) => {}
+                        Err(wgpu::SurfaceError::Other) => {}
+                    }
                 }
             }
             _ => {}
@@ -59,7 +82,7 @@ impl ApplicationHandler for App {
         // Drive a simple continuous redraw loop until a fixed tick/update model
         // is introduced.
         if let Some(window) = &self.window {
-            window.inner.request_redraw();
+            window.request_redraw();
         }
     }
 }
@@ -69,6 +92,7 @@ fn main() {
     let mut app = App {
         window: None,
         renderer: None,
+        input: InputState::default(),
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }

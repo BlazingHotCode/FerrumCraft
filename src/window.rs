@@ -8,6 +8,7 @@ use winit::error::OsError;
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::window::Window as WinitWindow;
+use winit::window::WindowId;
 
 use std::sync::Arc;
 
@@ -29,6 +30,16 @@ impl Window {
 
         let inner = Arc::new(event_loop.create_window(attributes)?);
         Ok(Self { inner })
+    }
+
+    /// Stable identifier used to ignore events for other platform windows.
+    pub fn id(&self) -> WindowId {
+        self.inner.id()
+    }
+
+    /// Queues a redraw request for the next event-loop cycle.
+    pub fn request_redraw(&self) {
+        self.inner.request_redraw();
     }
 }
 

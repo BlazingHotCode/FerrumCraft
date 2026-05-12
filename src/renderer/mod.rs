@@ -87,11 +87,8 @@ impl Renderer {
     }
 
     /// Encodes and presents one frame.
-    pub fn render(&self) {
-        let frame = self
-            .surface
-            .get_current_texture()
-            .expect("Failed to acquire swap chain texture");
+    pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
+        let frame = self.surface.get_current_texture()?;
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -110,6 +107,7 @@ impl Renderer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+        Ok(())
     }
 }
 
