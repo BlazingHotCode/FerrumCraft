@@ -8,7 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
+use serde::Deserialize;
 use wgpu::util::DeviceExt;
 
 use crate::resource::{ResourceCategory, ResourceManager};
@@ -21,6 +23,17 @@ pub struct TextureAtlas {
     pub sampler: wgpu::Sampler,
     pub view: wgpu::TextureView,
     uv_map: HashMap<String, [f32; 4]>,
+    animations: Vec<TextureAnimation>,
+    last_animation_update: Instant,
+}
+
+struct TextureAnimation {
+    atlas_x: u32,
+    atlas_y: u32,
+    frame_time: Duration,
+    elapsed: Duration,
+    frame_index: usize,
+    frames: Vec<Vec<u8>>,
 }
 
 impl TextureAtlas {
@@ -47,8 +60,10 @@ impl TextureAtlas {
 
         let count = unique.len() as u32;
         let atlas_h = ((count + ATLAS_COLS - 1) / ATLAS_COLS) * TEX_SIZE;
+        let atlas_w = ATLAS_COLS * TEX_SIZE;
         let mut atlas_pixels = vec![0u8; (ATLAS_COLS * TEX_SIZE * atlas_h * 4) as usize];
         let mut uv_map = HashMap::new();
+        let mut animations = Vec::new();
 
         for (i, path) in unique.iter().enumerate() {
             let png_path =
@@ -64,24 +79,47 @@ impl TextureAtlas {
                 }
             }
 
-            let pixels = match load_png(&png_path) {
-                Ok(p) => p,
+            let mut frames = match load_png_frames(&png_path) {
+                Ok(f) => f,
                 Err(e) => {
                     log::warn!(target: "textures", "Failed to load {}.png: {e}", path);
-                    vec![255u8; (TEX_SIZE * TEX_SIZE * 4) as usize]
+                    vec![vec![255u8; (TEX_SIZE * TEX_SIZE * 4) as usize]]
                 }
             };
+
+            if *path == "block/grass_block_side" {
+                apply_grass_side_overlay(resources, namespace, &mut frames);
+            } else {
+                // Apply biome colour tint for grass, leaves, and water.
+                for pixels in &mut frames {
+                    apply_biome_tint(path, pixels);
+                }
+            }
 
             let col = i as u32 % ATLAS_COLS;
             let row = i as u32 / ATLAS_COLS;
             let ox = (col * TEX_SIZE) as usize;
             let oy = (row * TEX_SIZE) as usize;
+            let pixels = &frames[0];
             for py in 0..TEX_SIZE as usize {
                 for px in 0..TEX_SIZE as usize {
                     let si = (py * TEX_SIZE as usize + px) * 4;
-                    let di = ((oy + py) * (ATLAS_COLS * TEX_SIZE) as usize + (ox + px)) * 4;
+                    let di = ((oy + py) * atlas_w as usize + (ox + px)) * 4;
                     atlas_pixels[di..di + 4].copy_from_slice(&pixels[si..si + 4]);
                 }
+            }
+
+            if frames.len() > 1 {
+                let frame_time = load_animation_frame_time(resources, namespace, path)
+                    .unwrap_or(Duration::from_millis(50));
+                animations.push(TextureAnimation {
+                    atlas_x: col * TEX_SIZE,
+                    atlas_y: row * TEX_SIZE,
+                    frame_time,
+                    elapsed: Duration::ZERO,
+                    frame_index: 0,
+                    frames,
+                });
             }
 
             let u0 = (col * TEX_SIZE) as f32 / (ATLAS_COLS * TEX_SIZE) as f32;
@@ -91,7 +129,6 @@ impl TextureAtlas {
             uv_map.insert(path.to_string(), [u0, v0, u1, v1]);
         }
 
-        let atlas_w = ATLAS_COLS * TEX_SIZE;
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
@@ -130,6 +167,54 @@ impl TextureAtlas {
             sampler,
             view,
             uv_map,
+            animations,
+            last_animation_update: Instant::now(),
+        }
+    }
+
+    pub fn update_animations(&mut self, queue: &wgpu::Queue) {
+        if self.animations.is_empty() {
+            return;
+        }
+
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.last_animation_update);
+        self.last_animation_update = now;
+
+        for animation in &mut self.animations {
+            animation.elapsed += dt;
+            if animation.elapsed < animation.frame_time {
+                continue;
+            }
+
+            while animation.elapsed >= animation.frame_time {
+                animation.elapsed -= animation.frame_time;
+                animation.frame_index = (animation.frame_index + 1) % animation.frames.len();
+            }
+
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: animation.atlas_x,
+                        y: animation.atlas_y,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &animation.frames[animation.frame_index],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(TEX_SIZE * 4),
+                    rows_per_image: Some(TEX_SIZE),
+                },
+                wgpu::Extent3d {
+                    width: TEX_SIZE,
+                    height: TEX_SIZE,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
     }
 
@@ -199,53 +284,190 @@ fn write_png(path: &PathBuf, rgba: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn load_png(path: &PathBuf) -> Result<Vec<u8>, String> {
+fn load_png_frames(path: &PathBuf) -> Result<Vec<Vec<u8>>, String> {
     let file = fs::File::open(path).map_err(|e| format!("open: {e}"))?;
     let r = BufReader::new(file);
-    let decoder = png::Decoder::new(r);
+    let mut decoder = png::Decoder::new(r);
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(|e| format!("read_info: {e}"))?;
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader
         .next_frame(&mut buf)
         .map_err(|e| format!("frame: {e}"))?;
 
-    if info.width != TEX_SIZE || info.height != TEX_SIZE {
+    if info.width != TEX_SIZE {
         return Err(format!(
-            "expected {}x{}, got {}x{}",
-            TEX_SIZE, TEX_SIZE, info.width, info.height
+            "expected {}px wide, got {}px",
+            TEX_SIZE, info.width
+        ));
+    }
+    if info.height < TEX_SIZE || info.height % TEX_SIZE != 0 {
+        return Err(format!(
+            "expected height to be a non-zero multiple of {}px, got {}px",
+            TEX_SIZE, info.height
         ));
     }
 
-    let bytes = &buf[..info.buffer_size()];
-    let size = (TEX_SIZE * TEX_SIZE) as usize;
-    match info.color_type {
-        png::ColorType::Rgba => Ok(bytes.to_vec()),
+    let bytes = &buf[..info.buffer_size().min(buf.len())];
+    let image_size = (info.width * info.height) as usize;
+    let mut rgba = match info.color_type {
+        png::ColorType::Rgba => bytes.to_vec(),
         png::ColorType::Rgb => {
-            let mut rgba = vec![0u8; size * 4];
-            for i in 0..size {
+            let mut rgba = vec![0u8; image_size * 4];
+            for i in 0..image_size {
                 rgba[i * 4] = bytes[i * 3];
                 rgba[i * 4 + 1] = bytes[i * 3 + 1];
                 rgba[i * 4 + 2] = bytes[i * 3 + 2];
                 rgba[i * 4 + 3] = 255;
             }
-            Ok(rgba)
+            rgba
         }
         png::ColorType::Grayscale => {
-            let mut rgba = vec![0u8; size * 4];
-            for i in 0..size {
+            let mut rgba = vec![0u8; image_size * 4];
+            for i in 0..image_size {
                 let g = bytes[i];
                 rgba[i * 4] = g;
                 rgba[i * 4 + 1] = g;
                 rgba[i * 4 + 2] = g;
                 rgba[i * 4 + 3] = 255;
             }
-            Ok(rgba)
+            rgba
         }
-        other => Err(format!("unsupported colour type {other:?}")),
+        png::ColorType::GrayscaleAlpha => {
+            let mut rgba = vec![0u8; image_size * 4];
+            for i in 0..image_size {
+                let g = bytes[i * 2];
+                rgba[i * 4] = g;
+                rgba[i * 4 + 1] = g;
+                rgba[i * 4 + 2] = g;
+                rgba[i * 4 + 3] = bytes[i * 2 + 1];
+            }
+            rgba
+        }
+        png::ColorType::Indexed => {
+            let palette = reader.info().palette.as_ref().ok_or("missing palette")?;
+            let mut rgba = vec![0u8; image_size * 4];
+            for i in 0..image_size {
+                let idx = bytes[i] as usize;
+                if idx * 3 + 2 < palette.len() {
+                    rgba[i * 4] = palette[idx * 3];
+                    rgba[i * 4 + 1] = palette[idx * 3 + 1];
+                    rgba[i * 4 + 2] = palette[idx * 3 + 2];
+                    rgba[i * 4 + 3] = 255;
+                }
+            }
+            rgba
+        }
+    };
+
+    let frame_count = (info.height / TEX_SIZE) as usize;
+    if frame_count == 1 {
+        return Ok(vec![rgba]);
     }
+
+    let frame_len = (TEX_SIZE * TEX_SIZE * 4) as usize;
+    let mut frames = Vec::with_capacity(frame_count);
+    for frame in 0..frame_count {
+        let start = frame * frame_len;
+        let end = start + frame_len;
+        frames.push(rgba[start..end].to_vec());
+    }
+    rgba.clear();
+    Ok(frames)
+}
+
+#[derive(Deserialize)]
+struct AnimationMetaFile {
+    animation: Option<AnimationMeta>,
+}
+
+#[derive(Deserialize)]
+struct AnimationMeta {
+    frametime: Option<u64>,
+}
+
+fn load_animation_frame_time(
+    resources: &ResourceManager,
+    namespace: &str,
+    path: &str,
+) -> Option<Duration> {
+    let meta_path = resources.path(
+        namespace,
+        ResourceCategory::Texture,
+        &format!("{path}.png.mcmeta"),
+    );
+    let text = fs::read_to_string(meta_path).ok()?;
+    let meta: AnimationMetaFile = serde_json::from_str(&text).ok()?;
+    let ticks = meta.animation?.frametime.unwrap_or(1).max(1);
+    Some(Duration::from_millis(ticks * 50))
 }
 
 // ── Procedural texture generation (fallback) ──────────────────────────────
+fn apply_grass_side_overlay(
+    resources: &ResourceManager,
+    namespace: &str,
+    base_frames: &mut [Vec<u8>],
+) {
+    let overlay_path = resources.path(
+        namespace,
+        ResourceCategory::Texture,
+        "block/grass_block_side_overlay.png",
+    );
+    let mut overlay_frames = match load_png_frames(&overlay_path) {
+        Ok(frames) => frames,
+        Err(e) => {
+            log::warn!(target: "textures", "Failed to load grass block side overlay: {e}");
+            return;
+        }
+    };
+
+    let overlay = &mut overlay_frames[0];
+    apply_biome_tint("block/grass_block_side_overlay", overlay);
+    for base in base_frames {
+        alpha_composite(base, overlay);
+    }
+}
+
+fn alpha_composite(base: &mut [u8], overlay: &[u8]) {
+    for i in 0..(TEX_SIZE * TEX_SIZE) as usize {
+        let idx = i * 4;
+        let alpha = overlay[idx + 3];
+        if alpha == 0 {
+            continue;
+        }
+
+        base[idx] = alpha_blend_channel(base[idx], overlay[idx], alpha);
+        base[idx + 1] = alpha_blend_channel(base[idx + 1], overlay[idx + 1], alpha);
+        base[idx + 2] = alpha_blend_channel(base[idx + 2], overlay[idx + 2], alpha);
+        base[idx + 3] = base[idx + 3].max(alpha);
+    }
+}
+
+fn alpha_blend_channel(base: u8, overlay: u8, alpha: u8) -> u8 {
+    let alpha = alpha as u16;
+    ((overlay as u16 * alpha + base as u16 * (255 - alpha)) / 255) as u8
+}
+
+fn apply_biome_tint(path: &str, rgba: &mut [u8]) {
+    let tint = match path {
+        "block/grass_block_top" | "block/grass_block_side_overlay" => Some([0x91, 0xbd, 0x59]),
+        "block/oak_leaves" => Some([0x59, 0x9b, 0x2f]),
+        "block/water_still" => Some([0x3f, 0x76, 0xe4]),
+        _ => None,
+    };
+    if let Some([tr, tg, tb]) = tint {
+        for i in 0..(TEX_SIZE * TEX_SIZE) as usize {
+            let idx = i * 4;
+            rgba[idx] = multiply_tint(rgba[idx], tr);
+            rgba[idx + 1] = multiply_tint(rgba[idx + 1], tg);
+            rgba[idx + 2] = multiply_tint(rgba[idx + 2], tb);
+        }
+    }
+}
+
+fn multiply_tint(channel: u8, tint: u8) -> u8 {
+    ((channel as u16 * tint as u16) / 255) as u8
+}
 
 fn procedural_texture(path: &str) -> Option<Vec<u8>> {
     let name = path.rsplit('/').next().unwrap_or(path);

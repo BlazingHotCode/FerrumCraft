@@ -131,7 +131,9 @@ impl Renderer {
     }
 
     /// Encodes and presents one frame.
-    pub fn render(&self, debug_text: Option<&str>) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, debug_text: Option<&str>) -> Result<(), wgpu::SurfaceError> {
+        self.atlas.update_animations(&self.queue);
+
         let frame = self.surface.get_current_texture()?;
         let view = frame
             .texture
