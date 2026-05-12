@@ -1,34 +1,21 @@
-//! Naive chunk mesher — produces vertex/index data for visible block faces.
+//! Chunk mesher — produces vertex/index data for visible block faces.
 //!
-//! In actual use: after terrain generation or block changes, the mesher scans
-//! each chunk and emits quads for faces that neighbor air or transparent blocks.
-//! The output is used to build GPU buffers that the renderer draws.
+//! Uses direct flat-array access for fast neighbor checks instead of per-block
+//! function calls. Each block visits its 6 neighbors via pre-computed index
+//! offsets, skipping blocks that are fully surrounded.
 
 use crate::block::BlockId;
 use crate::renderer::Vertex;
 use crate::world::Chunk;
 
-/// A single quad with position and color data.
-#[derive(Clone, Copy, Debug)]
-struct Quad {
-    vertices: [Vertex; 4],
-}
-
-/// Position of a block face in the mesh (before adding quad vertices).
-#[derive(Clone, Copy, Debug)]
-enum FaceDir {
-    Right,
-    Left,
-    Top,
-    Bottom,
-    Front,
-    Back,
-}
+const SX: usize = 16; // CHUNK_SIZE_X
+const SY: usize = 64; // CHUNK_SIZE_Y
+const SZ: usize = 16; // CHUNK_SIZE_Z
+const SLICE: usize = SX * SZ; // 256, size of one y-slice
 
 /// Colors for each block type (indexed by BlockId.0).
-/// Index 0 (air) is unused.
 const BLOCK_COLORS: &[[f32; 3]] = &[
-    [0.0, 0.0, 0.0], // 0: air (unused)
+    [0.0, 0.0, 0.0], // 0: air
     [0.5, 0.5, 0.5], // 1: stone
     [0.2, 0.6, 0.1], // 2: grass_block
     [0.5, 0.3, 0.1], // 3: dirt
@@ -40,151 +27,151 @@ const BLOCK_COLORS: &[[f32; 3]] = &[
     [0.6, 0.8, 0.9], // 9: glass
 ];
 
-fn block_color(id: BlockId) -> [f32; 3] {
+fn color(id: BlockId) -> [f32; 3] {
     let idx = id.0 as usize;
     if idx < BLOCK_COLORS.len() {
         BLOCK_COLORS[idx]
     } else {
-        [1.0, 0.0, 1.0] // magenta = missing
+        [1.0, 0.0, 1.0]
     }
 }
 
-/// Output of the mesher: vertex and index data plus a count.
+/// Output of the mesher.
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u16>,
 }
 
-/// Meshes a single chunk, returning vertex/index data for visible faces.
-pub fn mesh_chunk(chunk: &Chunk) -> MeshData {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let mut vertex_offset: u16 = 0;
+/// Neighbor offset table: for each of 6 faces, the (index_offset, face_direction).
+/// Index offsets are pre-computed for a 16×64×16 chunk layout.
+const NEIGHBORS: [(i32, u8); 6] = [
+    (1, 0),    // Right  (+X): index + 1
+    (-1, 1),   // Left   (-X): index - 1
+    (256, 2),  // Top    (+Y): index + 256 (16*16)
+    (-256, 3), // Bottom (-Y): index - 256
+    (16, 4),   // Front  (+Z): index + 16
+    (-16, 5),  // Back   (-Z): index - 16
+];
 
-    for z in 0..crate::world::CHUNK_SIZE_Z {
-        for y in 0..crate::world::CHUNK_SIZE_Y {
-            for x in 0..crate::world::CHUNK_SIZE_X {
-                let block_id = chunk.get_block(x, y, z);
-                if block_id == BlockId::AIR {
+/// Meshes a single chunk using direct flat-array access.
+pub fn mesh_chunk(chunk: &Chunk) -> MeshData {
+    let blocks = chunk.blocks();
+    let mut verts = Vec::new();
+    let mut inds = Vec::new();
+    let mut off: u16 = 0;
+
+    for y in 0..SY {
+        let base_y = y * SLICE;
+        for z in 0..SZ {
+            let base_zy = base_y + z * SX;
+            for x in 0..SX {
+                let idx = base_zy + x;
+                let block = blocks[idx];
+                if block == BlockId::AIR {
                     continue;
                 }
+                let c = color(block);
+                let fx = x as f32;
+                let fy = y as f32;
+                let fz = z as f32;
 
-                let color = block_color(block_id);
-
-                // Check each of the 6 faces.
-                let checks: [(FaceDir, i32, i32, i32); 6] = [
-                    (FaceDir::Right, 1, 0, 0),
-                    (FaceDir::Left, -1, 0, 0),
-                    (FaceDir::Top, 0, 1, 0),
-                    (FaceDir::Bottom, 0, -1, 0),
-                    (FaceDir::Front, 0, 0, 1),
-                    (FaceDir::Back, 0, 0, -1),
-                ];
-
-                for (dir, dx, dy, dz) in &checks {
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
-                    let nz = z as i32 + dz;
-
-                    // Check if neighbor is air or outside chunk (treat as visible).
-                    let visible = if nx < 0
-                        || nx >= crate::world::CHUNK_SIZE_X as i32
-                        || ny < 0
-                        || ny >= crate::world::CHUNK_SIZE_Y as i32
-                        || nz < 0
-                        || nz >= crate::world::CHUNK_SIZE_Z as i32
-                    {
-                        true // chunk boundary — visible
+                for &(delta, dir) in &NEIGHBORS {
+                    let ni = idx as i32 + delta;
+                    let visible = if ni < 0 || ni >= (SY * SLICE) as i32 {
+                        true
                     } else {
-                        let neighbor = chunk.get_block(nx as usize, ny as usize, nz as usize);
-                        neighbor == BlockId::AIR || neighbor.0 == 5 // air or water
+                        let nb = blocks[ni as usize];
+                        nb == BlockId::AIR || nb.0 == 5
                     };
-
                     if !visible {
                         continue;
                     }
 
-                    let quad = face_quad(*dir, x as f32, y as f32, z as f32, color);
-                    let base = vertex_offset;
-                    for v in &quad.vertices {
-                        vertices.push(*v);
-                    }
-                    indices.extend_from_slice(&[
-                        base,
-                        base + 1,
-                        base + 2,
-                        base,
-                        base + 2,
-                        base + 3,
-                    ]);
-                    vertex_offset += 4;
+                    let q = quad(dir, fx, fy, fz, c);
+                    let base = off;
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                    off += 4;
                 }
             }
         }
     }
 
-    MeshData { vertices, indices }
+    MeshData {
+        vertices: verts,
+        indices: inds,
+    }
 }
 
-/// Builds a quad for one face of a unit cube at (ox, oy, oz).
-fn face_quad(dir: FaceDir, ox: f32, oy: f32, oz: f32, color: [f32; 3]) -> Quad {
+#[derive(Clone, Copy)]
+struct Quad {
+    vertices: [Vertex; 4],
+}
+
+fn quad(dir: u8, ox: f32, oy: f32, oz: f32, color: [f32; 3]) -> Quad {
     let (a, b, c, d) = match dir {
-        FaceDir::Right => (
+        // Right (+X)
+        0 => (
             [1.0, 0.0, 0.0],
             [1.0, 1.0, 0.0],
             [1.0, 1.0, 1.0],
             [1.0, 0.0, 1.0],
         ),
-        FaceDir::Left => (
+        // Left (-X)
+        1 => (
             [0.0, 0.0, 1.0],
             [0.0, 1.0, 1.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0],
         ),
-        FaceDir::Top => (
+        // Top (+Y)
+        2 => (
             [0.0, 1.0, 0.0],
             [0.0, 1.0, 1.0],
             [1.0, 1.0, 1.0],
             [1.0, 1.0, 0.0],
         ),
-        FaceDir::Bottom => (
+        // Bottom (-Y)
+        3 => (
             [0.0, 0.0, 1.0],
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
             [1.0, 0.0, 1.0],
         ),
-        FaceDir::Front => (
+        // Front (+Z)
+        4 => (
             [0.0, 0.0, 1.0],
             [1.0, 0.0, 1.0],
             [1.0, 1.0, 1.0],
             [0.0, 1.0, 1.0],
         ),
-        FaceDir::Back => (
+        // Back (-Z)
+        5 => (
             [1.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
             [1.0, 1.0, 0.0],
         ),
+        _ => unreachable!(),
     };
 
-    let offset = |v: [f32; 3]| -> [f32; 3] { [v[0] + ox - 8.0, v[1] + oy, v[2] + oz - 8.0] };
-
+    let off = |v: [f32; 3]| [v[0] + ox - 8.0, v[1] + oy, v[2] + oz - 8.0];
     Quad {
         vertices: [
             Vertex {
-                position: offset(a),
+                position: off(a),
                 tint: color,
             },
             Vertex {
-                position: offset(b),
+                position: off(b),
                 tint: color,
             },
             Vertex {
-                position: offset(c),
+                position: off(c),
                 tint: color,
             },
             Vertex {
-                position: offset(d),
+                position: off(d),
                 tint: color,
             },
         ],
