@@ -74,6 +74,25 @@ impl FirstPersonCamera {
         self.position
     }
 
+    /// Human-readable facing direction for the F3 debug overlay.
+    ///
+    /// Returns a string like `"North (-Z)"` based on the horizontal yaw component.
+    pub fn facing_name(&self) -> String {
+        // Normalise yaw to 0–360 range.
+        let yaw = self.yaw.to_degrees().rem_euclid(360.0);
+        // 0 = South (+Z), 90 = West (-X), 180/–180 = North (–Z), –90 = East (+X)
+        let dir = if yaw < 45.0 || yaw >= 315.0 {
+            "SOUTH (+Z)"
+        } else if yaw < 135.0 {
+            "WEST (-X)"
+        } else if yaw < 225.0 {
+            "NORTH (-Z)"
+        } else {
+            "EAST (+X)"
+        };
+        dir.to_string()
+    }
+
     fn view_matrix(&self) -> Mat4 {
         Mat4::look_to_rh(self.position, self.forward(), Vec3::Y)
     }

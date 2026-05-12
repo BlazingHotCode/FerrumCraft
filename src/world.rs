@@ -50,6 +50,8 @@ pub struct Chunk {
     pos: ChunkPos,
     blocks: [BlockId; CHUNK_VOLUME],
     dirty: bool,
+    /// Per-block property overrides: map block index → (property_schema_index, value_index) pairs.
+    properties: HashMap<usize, Vec<(u8, u8)>>,
 }
 
 impl Chunk {
@@ -59,6 +61,7 @@ impl Chunk {
             pos,
             blocks: [BlockId::AIR; CHUNK_VOLUME],
             dirty: false,
+            properties: HashMap::new(),
         }
     }
 
@@ -96,6 +99,27 @@ impl Chunk {
     /// Computes the flat array index for local coordinates.
     fn index(x: usize, y: usize, z: usize) -> usize {
         y * CHUNK_SIZE_Z * CHUNK_SIZE_X + z * CHUNK_SIZE_X + x
+    }
+
+    /// Returns the value index for a block property at the given local position.
+    ///
+    /// Returns 0 (the default) if no override has been set.
+    pub fn get_property(&self, x: usize, y: usize, z: usize, prop_idx: u8) -> u8 {
+        let idx = Self::index(x, y, z);
+        self.properties
+            .get(&idx)
+            .and_then(|props| props.iter().find(|(p, _)| *p == prop_idx).map(|(_, v)| *v))
+            .unwrap_or(0)
+    }
+
+    /// Sets a block property value at the given local position.
+    pub fn set_property(&mut self, x: usize, y: usize, z: usize, prop_idx: u8, value_idx: u8) {
+        let idx = Self::index(x, y, z);
+        self.properties
+            .entry(idx)
+            .or_default()
+            .push((prop_idx, value_idx));
+        self.dirty = true;
     }
 }
 
@@ -172,6 +196,33 @@ impl World {
     /// Number of loaded chunks.
     pub fn chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    /// Gets a block property value at an absolute world position.
+    ///
+    /// Returns 0 (default) if the chunk is not loaded or no override exists.
+    pub fn get_block_property(&self, pos: BlockPos, prop_idx: u8) -> u8 {
+        let cp = pos.chunk_pos();
+        let (lx, ly, lz) = pos.local();
+        self.chunks
+            .get(&cp)
+            .map_or(0, |c| c.get_property(lx, ly, lz, prop_idx))
+    }
+
+    /// Sets a block property value at an absolute world position.
+    pub fn set_block_property(&mut self, pos: BlockPos, prop_idx: u8, value_idx: u8) {
+        let cp = pos.chunk_pos();
+        let (lx, ly, lz) = pos.local();
+        let chunk = self.chunks.entry(cp).or_insert_with(|| {
+            let mut c = Chunk::new(cp);
+            c.clear_dirty();
+            c
+        });
+        chunk.set_property(lx, ly, lz, prop_idx, value_idx);
+
+        if !self.dirty_chunks.contains(&cp) {
+            self.dirty_chunks.push(cp);
+        }
     }
 }
 

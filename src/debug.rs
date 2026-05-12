@@ -17,6 +17,7 @@ pub struct DebugOverlay {
     fps: u32,
     frame_ms: f32,
     player_position: Vec3,
+    facing: String,
 }
 
 impl DebugOverlay {
@@ -43,11 +44,16 @@ impl DebugOverlay {
         self.player_position = position;
     }
 
+    /// Updates the facing direction string shown by F3.
+    pub fn set_facing(&mut self, facing: String) {
+        self.facing = facing;
+    }
+
     /// Text rendered by the overlay when visible.
     pub fn text(&self) -> Option<String> {
         self.visible.then(|| {
             format!(
-                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPLAYER: {:.2} {:.2} {:.2}\nCHUNK: {} {}",
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}",
                 self.fps,
                 self.frame_ms,
                 self.player_position.x,
@@ -55,6 +61,7 @@ impl DebugOverlay {
                 self.player_position.z,
                 chunk_coord(self.player_position.x),
                 chunk_coord(self.player_position.z),
+                self.facing,
             )
         })
     }

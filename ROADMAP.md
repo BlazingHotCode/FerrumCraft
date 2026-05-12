@@ -44,9 +44,9 @@ refined as adjacent systems mature.
 - [x] Block display names resolved through lang keys
 - [x] Core blocks: air, grass, dirt, stone, sand, water, log, leaves, planks, glass
 - [x] Block properties: solid, opaque, transparent, liquid, hardness, light emission
-- [ ] Data-driven block components (collision, flammable, gravity affected, inventory, smelting, etc.)
-- [ ] Blockstate property schemas defining allowed values (axis, facing, waterlogged, growth, etc.)
-- [ ] Blockstate storage for property variants (axis, facing, waterlogged, growth, etc.)
+- [x] Data-driven block components (collision, flammable, gravity affected, inventory, smelting, etc.)
+- [x] Blockstate property schemas defining allowed values (axis, facing, waterlogged, growth, etc.)
+- [x] Blockstate storage for property variants (axis, facing, waterlogged, growth, etc.)
 - [x] Chunk storage (16x64x16 initially, expandable later)
 - [x] World struct managing loaded chunks by chunk coordinate
 - [x] Safe block get/set APIs across chunk boundaries

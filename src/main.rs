@@ -220,6 +220,7 @@ impl App {
         if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
             renderer.set_view_projection(camera.view_projection());
             self.debug_overlay.set_player_position(camera.position());
+            self.debug_overlay.set_facing(camera.facing_name());
         }
     }
 
@@ -296,6 +297,26 @@ fn main() {
     let block_registry = block::register_core_blocks();
     log::info!(target: "blocks", "Registered {} core block types", block_registry.len());
 
+    // Log block component summary.
+    let flammable_count = block_registry
+        .iter()
+        .filter(|(_, b)| b.components.flammable.is_some())
+        .count();
+    let gravity_count = block_registry
+        .iter()
+        .filter(|(_, b)| b.components.gravity_affected)
+        .count();
+    let replaceable_count = block_registry
+        .iter()
+        .filter(|(_, b)| b.components.replaceable)
+        .count();
+    let tool_count = block_registry
+        .iter()
+        .filter(|(_, b)| b.components.required_tool_tier != block::ToolTier::None)
+        .count();
+    log::info!(target: "blocks", "Components: {} flammable, {} gravity-affected, {} replaceable, {} require tool",
+        flammable_count, gravity_count, replaceable_count, tool_count);
+
     // Collect block IDs and load their models (skip air).
     let block_ids: Vec<_> = block_registry
         .iter()
@@ -334,6 +355,27 @@ fn main() {
     world.set_block(world::BlockPos(0, 0, 0), block::BlockId(1));
     world.set_block(world::BlockPos(1, 0, 0), block::BlockId(2));
     world.set_block(world::BlockPos(2, 0, 0), block::BlockId(3));
+    // Set axis property on log block at (3,0,0) to x (index 1).
+    let log_id = block::BlockId(7);
+    world.set_block(world::BlockPos(3, 0, 0), log_id);
+    if let Some(def) = block_registry
+        .iter()
+        .find(|(id, _)| id.path() == "log")
+        .map(|(_, d)| d)
+    {
+        world.set_block_property(world::BlockPos(3, 0, 0), 0, 1);
+        log::info!(target: "world", "Log axis = {}, properties: {:?}",
+            def.properties[0].values[world.get_block_property(world::BlockPos(3, 0, 0), 0) as usize],
+            def.properties);
+    }
+    log::info!(target: "world", "Directions: north={}, south={}, west={}, east={}, up={}, down={}",
+        block::direction::NORTH,
+        block::direction::SOUTH,
+        block::direction::WEST,
+        block::direction::EAST,
+        block::direction::UP,
+        block::direction::DOWN);
+    log::info!(target: "world", "Facing property order: {:?}", &block::direction::ALL);
     log::info!(target: "world", "Demo world created: {} chunks, {} dirty, block at (0,0,0) = {:?}",
         world.chunk_count(),
         world.drain_dirty().len(),
