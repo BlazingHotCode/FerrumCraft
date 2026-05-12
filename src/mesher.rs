@@ -42,17 +42,6 @@ pub struct MeshData {
     pub indices: Vec<u16>,
 }
 
-/// Neighbor offset table: for each of 6 faces, the (index_offset, face_direction).
-/// Index offsets are pre-computed for a 16×64×16 chunk layout.
-const NEIGHBORS: [(i32, u8); 6] = [
-    (1, 0),    // Right  (+X): index + 1
-    (-1, 1),   // Left   (-X): index - 1
-    (256, 2),  // Top    (+Y): index + 256 (16*16)
-    (-256, 3), // Bottom (-Y): index - 256
-    (16, 4),   // Front  (+Z): index + 16
-    (-16, 5),  // Back   (-Z): index - 16
-];
-
 /// Meshes a single chunk using direct flat-array access.
 pub fn mesh_chunk(chunk: &Chunk) -> MeshData {
     let blocks = chunk.blocks();
@@ -75,22 +64,47 @@ pub fn mesh_chunk(chunk: &Chunk) -> MeshData {
                 let fy = y as f32;
                 let fz = z as f32;
 
-                for &(delta, dir) in &NEIGHBORS {
-                    let ni = idx as i32 + delta;
-                    let visible = if ni < 0 || ni >= (SY * SLICE) as i32 {
-                        true
-                    } else {
-                        let nb = blocks[ni as usize];
-                        nb == BlockId::AIR || nb.0 == 5
-                    };
-                    if !visible {
-                        continue;
-                    }
-
-                    let q = quad(dir, fx, fy, fz, c);
-                    let base = off;
+                // Right (+X)
+                if x + 1 >= SX || blocks[idx + 1] == BlockId::AIR || blocks[idx + 1].0 == 5 {
+                    let q = quad(0, fx, fy, fz, c);
                     verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Left (-X)
+                if x == 0 || blocks[idx - 1] == BlockId::AIR || blocks[idx - 1].0 == 5 {
+                    let q = quad(1, fx, fy, fz, c);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Top (+Y)
+                if y + 1 >= SY || blocks[idx + SLICE] == BlockId::AIR || blocks[idx + SLICE].0 == 5
+                {
+                    let q = quad(2, fx, fy, fz, c);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Bottom (-Y)
+                if y == 0 || blocks[idx - SLICE] == BlockId::AIR || blocks[idx - SLICE].0 == 5 {
+                    let q = quad(3, fx, fy, fz, c);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Front (+Z)
+                if z + 1 >= SZ || blocks[idx + SX] == BlockId::AIR || blocks[idx + SX].0 == 5 {
+                    let q = quad(4, fx, fy, fz, c);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Back (-Z)
+                if z == 0 || blocks[idx - SX] == BlockId::AIR || blocks[idx - SX].0 == 5 {
+                    let q = quad(5, fx, fy, fz, c);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
                     off += 4;
                 }
             }
