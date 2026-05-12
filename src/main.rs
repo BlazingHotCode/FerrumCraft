@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use camera::FirstPersonCamera;
 use debug::DebugOverlay;
+use glam::Vec3;
 use input::InputState;
 use winit::application::ApplicationHandler;
 use winit::event::DeviceEvent;
@@ -22,10 +23,13 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::ControlFlow;
 use winit::event_loop::EventLoop;
+use winit::keyboard::KeyCode;
 
 const GAME_TICK_RATE: u32 = 20;
 const FIXED_TIMESTEP: Duration = Duration::from_nanos(1_000_000_000 / GAME_TICK_RATE as u64);
 const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
+const FREE_FLY_SPEED: f32 = 6.0;
+const FREE_FLY_ACCELERATION: f32 = 18.0;
 
 /// Top-level application state owned by the winit event loop.
 ///
@@ -39,7 +43,9 @@ struct App {
     debug_overlay: DebugOverlay,
     pointer_locked: bool,
     last_update: Instant,
+    last_frame_update: Instant,
     fixed_update_accumulator: Duration,
+    free_fly_velocity: Vec3,
 }
 
 impl ApplicationHandler for App {
@@ -158,6 +164,13 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        let frame_dt = now
+            .saturating_duration_since(self.last_frame_update)
+            .min(Duration::from_millis(100));
+        self.last_frame_update = now;
+
+        self.update_free_fly_movement(frame_dt);
         self.run_fixed_updates();
 
         if let Some(window) = &self.window {
@@ -193,12 +206,57 @@ impl App {
         }
     }
 
+    fn update_free_fly_movement(&mut self, dt: Duration) {
+        let Some(camera) = &mut self.camera else {
+            return;
+        };
+
+        let direction = free_fly_direction(camera, &self.input);
+        let target_velocity = direction * FREE_FLY_SPEED;
+        let smoothing = 1.0 - (-FREE_FLY_ACCELERATION * dt.as_secs_f32()).exp();
+        self.free_fly_velocity = self.free_fly_velocity.lerp(target_velocity, smoothing);
+
+        if self.free_fly_velocity.length_squared() > 0.0001 {
+            camera.translate_world(self.free_fly_velocity * dt.as_secs_f32());
+        }
+
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_view_projection(camera.view_projection());
+        }
+        self.debug_overlay.set_player_position(camera.position());
+    }
+
     fn set_pointer_locked(&mut self, locked: bool) {
         self.pointer_locked = locked;
         if let Some(window) = &self.window {
             window.set_pointer_locked(locked);
         }
     }
+}
+
+fn free_fly_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
+    let mut movement = Vec3::ZERO;
+
+    if input.is_key_pressed(KeyCode::KeyW) {
+        movement += camera.yaw_forward();
+    }
+    if input.is_key_pressed(KeyCode::KeyS) {
+        movement -= camera.yaw_forward();
+    }
+    if input.is_key_pressed(KeyCode::KeyA) {
+        movement -= camera.yaw_right();
+    }
+    if input.is_key_pressed(KeyCode::KeyD) {
+        movement += camera.yaw_right();
+    }
+    if input.is_key_pressed(KeyCode::Space) {
+        movement.y += 1.0;
+    }
+    if input.is_key_pressed(KeyCode::ShiftLeft) || input.is_key_pressed(KeyCode::ShiftRight) {
+        movement.y -= 1.0;
+    }
+
+    movement.try_normalize().unwrap_or(Vec3::ZERO)
 }
 
 fn main() {
@@ -212,7 +270,9 @@ fn main() {
         debug_overlay: DebugOverlay::default(),
         pointer_locked: false,
         last_update: Instant::now(),
+        last_frame_update: Instant::now(),
         fixed_update_accumulator: Duration::ZERO,
+        free_fly_velocity: Vec3::ZERO,
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }

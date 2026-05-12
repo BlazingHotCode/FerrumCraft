@@ -46,6 +46,23 @@ impl FirstPersonCamera {
         self.pitch = (self.pitch - delta.1 as f32 * MOUSE_SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
+    /// Moves the camera by a world-space offset.
+    pub fn translate_world(&mut self, offset: Vec3) {
+        self.position += offset;
+    }
+
+    /// Horizontal forward direction from yaw only, ignoring pitch.
+    pub fn yaw_forward(&self) -> Vec3 {
+        let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
+        Vec3::new(yaw_cos, 0.0, yaw_sin).normalize()
+    }
+
+    /// Horizontal right direction from yaw only, ignoring pitch.
+    pub fn yaw_right(&self) -> Vec3 {
+        let forward = self.yaw_forward();
+        Vec3::new(-forward.z, 0.0, forward.x)
+    }
+
     /// Combined view/projection matrix consumed by the renderer.
     pub fn view_projection(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix()
