@@ -1,3 +1,9 @@
+//! Rendering entry point.
+//!
+//! `Renderer` owns the GPU device, swapchain surface, scene state, and render
+//! pipelines. It coordinates frame acquisition and submission, while the
+//! submodules own scene data, mesh data, and render-pass encoding details.
+
 mod mesh;
 mod pipeline;
 mod scene;
@@ -8,8 +14,15 @@ use pipeline::RenderPipelines;
 use scene::Scene;
 use winit::window::Window;
 
+/// Coordinates GPU resources and per-frame rendering.
+///
+/// This type intentionally keeps window/surface orchestration separate from
+/// scene contents and pipeline encoding so future renderer features can grow in
+/// the relevant module instead of accumulating here.
 pub struct Renderer {
+    /// GPU device used to create buffers, textures, and pipeline resources.
     pub device: wgpu::Device,
+    /// Submission queue for completed command buffers and future resource uploads.
     pub queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -18,6 +31,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Creates the surface, selects an adapter, and initializes renderer state.
     pub async fn new(window: Arc<Window>) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let size = window.inner_size();
@@ -54,12 +68,17 @@ impl Renderer {
         }
     }
 
+    /// Reconfigures the swapchain for the latest window size.
+    ///
+    /// WGPU surfaces cannot be configured with zero dimensions, so minimized
+    /// windows are clamped to a 1x1 drawable surface.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.config.width = width.max(1);
         self.config.height = height.max(1);
         self.surface.configure(&self.device, &self.config);
     }
 
+    /// Encodes and presents one frame.
     pub fn render(&self) {
         let frame = self
             .surface

@@ -1,3 +1,8 @@
+//! Window construction helpers.
+//!
+//! This module wraps winit window setup so the application entry point does not
+//! need to know title, initial size, or ownership details.
+
 use winit::dpi::PhysicalSize;
 use winit::error::OsError;
 use winit::event_loop::ActiveEventLoop;
@@ -6,12 +11,16 @@ use winit::window::Window as WinitWindow;
 
 use std::sync::Arc;
 
+/// Game window handle shared with systems that need direct winit access.
 pub struct Window {
+    /// Shared winit window used by the renderer to create a surface and by the
+    /// event loop to request redraws.
     #[allow(dead_code)]
     pub inner: Arc<WinitWindow>,
 }
 
 impl Window {
+    /// Creates the main game window with a sensible initial monitor-relative size.
     pub fn new(event_loop: &ActiveEventLoop) -> Result<Self, OsError> {
         let size = preferred_size(event_loop.primary_monitor().as_ref());
         let attributes = WinitWindow::default_attributes()
@@ -23,6 +32,10 @@ impl Window {
     }
 }
 
+/// Chooses an initial window size based on the primary monitor.
+///
+/// The fallback keeps window creation deterministic on platforms that do not
+/// expose monitor dimensions or report invalid values.
 fn preferred_size(monitor: Option<&MonitorHandle>) -> PhysicalSize<u32> {
     const DEFAULT: PhysicalSize<u32> = PhysicalSize::new(1280, 720);
     const FRACTION: f32 = 0.8;

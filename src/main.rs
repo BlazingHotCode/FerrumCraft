@@ -1,3 +1,9 @@
+//! FerrumCraft application entry point.
+//!
+//! This module wires together the winit application lifecycle, window creation,
+//! and renderer frame loop. Game state should move into dedicated modules as it
+//! grows; this file should stay focused on top-level orchestration.
+
 mod renderer;
 mod window;
 
@@ -6,6 +12,10 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::EventLoop;
 
+/// Top-level application state owned by the winit event loop.
+///
+/// Window and renderer creation is deferred until `resumed` because winit
+/// requires platform window handles to be created from an active event loop.
 struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
@@ -46,6 +56,8 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // Drive a simple continuous redraw loop until a fixed tick/update model
+        // is introduced.
         if let Some(window) = &self.window {
             window.inner.request_redraw();
         }

@@ -1,5 +1,9 @@
 # FerrumCraft Roadmap
 
+This roadmap tracks broad implementation milestones. Checked items are complete
+enough to support the next phase, but may still be refined as nearby systems are
+expanded.
+
 ## Phase 1 — Foundation
 - [x] Window with winit
 - [x] wgpu rendering pipeline (clear screen)
