@@ -50,6 +50,7 @@ const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
 const DEMO_WORLD_SEED: u64 = 12_345;
+const WORLD_RENDER_OFFSET: f32 = 8.5;
 
 /// Top-level application state owned by the winit event loop.
 ///
@@ -398,8 +399,8 @@ fn build_chunk_meshes(
 
 fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
     world::ChunkPos(
-        ((position.x + 8.0).floor() as i32).div_euclid(world::CHUNK_SIZE_X as i32),
-        ((position.z + 8.0).floor() as i32).div_euclid(world::CHUNK_SIZE_Z as i32),
+        ((position.x + WORLD_RENDER_OFFSET).floor() as i32).div_euclid(world::CHUNK_SIZE_X as i32),
+        ((position.z + WORLD_RENDER_OFFSET).floor() as i32).div_euclid(world::CHUNK_SIZE_Z as i32),
     )
 }
 
@@ -411,6 +412,7 @@ fn create_demo_world(
     world.load_chunk(origin);
 
     let id = |s: &str| block::BlockId(s.to_string());
+    let noise_settings = worldgen::NoiseSettings::demo();
 
     for x in 0..world::CHUNK_SIZE_X {
         for z in 0..world::CHUNK_SIZE_Z {
@@ -420,8 +422,11 @@ fn create_demo_world(
     }
     for x in 32..48 {
         for z in 0..16 {
-            world.set_block(world::BlockPos(x, 0, z), id("dirt"));
-            world.set_block(world::BlockPos(x, 1, z), id("grass_block"));
+            let sample = noise_settings.sample(&world, x, z);
+            for y in 0..sample.height {
+                world.set_block(world::BlockPos(x, y, z), id("dirt"));
+            }
+            world.set_block(world::BlockPos(x, sample.height, z), id("grass_block"));
         }
     }
     let stone_column = worldgen::ConfiguredFeature {
@@ -536,9 +541,9 @@ fn place_ao_test_structure(world: &mut world::World, origin: world::BlockPos) {
 
 fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
     let block_pos = world::BlockPos(
-        (position.x + 8.0).floor() as i32,
+        (position.x + WORLD_RENDER_OFFSET).floor() as i32,
         position.y.floor() as i32,
-        (position.z + 8.0).floor() as i32,
+        (position.z + WORLD_RENDER_OFFSET).floor() as i32,
     );
     if world.get_block(block_pos).0 != "water" {
         return None;
@@ -674,6 +679,7 @@ fn main() {
     // Create a demo world and place some blocks.
     let mut world = create_demo_world(&worldgen_feature_types);
     log::info!(target: "world", "Demo world seed: {}", world.seed());
+    log::info!(target: "worldgen", "Demo noise settings: {:?}", worldgen::NoiseSettings::demo());
     if let Some(def) = block_registry
         .iter()
         .find(|(id, _)| id.path() == "oak_log")

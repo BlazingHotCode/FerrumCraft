@@ -68,7 +68,7 @@ refined as adjacent systems mature.
 ## Phase 6 - Terrain Generation
 - [x] Deterministic world seed
 - [x] Worldgen feature registry with namespaced string IDs
-- [ ] Noise settings for terrain shape (height, continentalness, erosion, peaks/valleys)
+- [x] Noise settings for terrain shape (height, continentalness, erosion, peaks/valleys)
 - [ ] Biome source and biome map generation from seed/noise
 - [ ] Chunk noise population: stone terrain from height and density fields
 - [ ] Surface rules for biome top/filler blocks (grass, dirt, sand, stone)

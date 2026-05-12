@@ -322,7 +322,7 @@ fn quad(
     ao: [f32; 4],
 ) -> Quad {
     let [u0, v0, u1, v1] = uv;
-    let off = |v: [f32; 3]| [v[0] + ox - 8.0, v[1] + oy, v[2] + oz - 8.0];
+    let off = |v: [f32; 3]| [v[0] + ox - 8.5, v[1] + oy, v[2] + oz - 8.5];
     // Each face: (a,b,c,d) where triangles are a→b→c and a→c→d (CCW outside).
     // UV coords: bottom-left→[u0,v1], top-left→[u0,v0], top-right→[u1,v0], bottom-right→[u1,v1]
     let (verts, uvs): ([_; 4], [[f32; 2]; 4]) = match dir {

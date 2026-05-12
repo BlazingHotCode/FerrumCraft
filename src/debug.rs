@@ -92,5 +92,5 @@ impl DebugOverlay {
 }
 
 fn chunk_coord(block_coord: f32) -> i32 {
-    (block_coord.floor() as i32).div_euclid(16)
+    ((block_coord + 8.5).floor() as i32).div_euclid(16)
 }
