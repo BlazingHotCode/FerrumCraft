@@ -8,11 +8,18 @@ mod input;
 mod renderer;
 mod window;
 
+use std::time::{Duration, Instant};
+
 use input::InputState;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::ControlFlow;
 use winit::event_loop::EventLoop;
+
+const GAME_TICK_RATE: u32 = 20;
+const FIXED_TIMESTEP: Duration = Duration::from_nanos(1_000_000_000 / GAME_TICK_RATE as u64);
+const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
 
 /// Top-level application state owned by the winit event loop.
 ///
@@ -22,6 +29,8 @@ struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
     input: InputState,
+    last_update: Instant,
+    fixed_update_accumulator: Duration,
 }
 
 impl ApplicationHandler for App {
@@ -79,20 +88,47 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Drive a simple continuous redraw loop until a fixed tick/update model
-        // is introduced.
+        self.run_fixed_updates();
+
         if let Some(window) = &self.window {
             window.request_redraw();
         }
     }
 }
 
+impl App {
+    fn run_fixed_updates(&mut self) {
+        let now = Instant::now();
+        self.fixed_update_accumulator += now.saturating_duration_since(self.last_update);
+        self.last_update = now;
+
+        let mut steps = 0;
+        while self.fixed_update_accumulator >= FIXED_TIMESTEP && steps < MAX_FIXED_STEPS_PER_FRAME {
+            self.fixed_update(FIXED_TIMESTEP);
+            self.fixed_update_accumulator -= FIXED_TIMESTEP;
+            steps += 1;
+        }
+
+        if steps == MAX_FIXED_STEPS_PER_FRAME {
+            self.fixed_update_accumulator = Duration::ZERO;
+        }
+    }
+
+    fn fixed_update(&mut self, _dt: Duration) {
+        // Match Minecraft's 20 ticks-per-second simulation rate while rendering
+        // stays independent and can run at a higher frame rate.
+    }
+}
+
 fn main() {
     let event_loop = EventLoop::new().expect("Failed to create event loop");
+    event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
         window: None,
         renderer: None,
         input: InputState::default(),
+        last_update: Instant::now(),
+        fixed_update_accumulator: Duration::ZERO,
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }

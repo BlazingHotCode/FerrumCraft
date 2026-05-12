@@ -15,7 +15,7 @@ refined as adjacent systems mature.
 - [x] Built-in debug shapes (triangle, cube, plane)
 - [x] Event loop integration (resize, redraw, input plumbing)
 - [x] Basic shaders + material/color pipeline
-- [ ] Fixed timestep game update loop
+- [x] Fixed timestep game update loop
 - [ ] Debug overlay (FPS, frame time, player/chunk position)
 
 ## Phase 2 - First-Person Player
