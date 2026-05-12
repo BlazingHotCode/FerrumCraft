@@ -342,7 +342,7 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
             ),
         ),
         (
-            "leaves",
+            "oak_leaves",
             BlockDefinition::block(
                 "block.leaves",
                 true,

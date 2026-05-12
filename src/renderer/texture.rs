@@ -358,7 +358,7 @@ fn log_top() -> Vec<u8> {
     for y in 0..16 {
         for x in 0..16 {
             let i = (y * 16 + x) * 4;
-            let dist = ((x as i32 - 8).abs().max((y as i32 - 8).abs()) as u8);
+            let dist = (x as i32 - 8).abs().max((y as i32 - 8).abs()) as u8;
             let ring = (dist % 4 == 0) as u8 * 20;
             let s = (y as u32 * 16 + x as u32).wrapping_mul(3);
             let n = ((s.wrapping_mul(0x9E3779B9) >> 16) as u8) % 10;
