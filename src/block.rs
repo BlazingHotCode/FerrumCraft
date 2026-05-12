@@ -364,7 +364,7 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
             ),
         ),
         (
-            "planks",
+            "oak_planks",
             BlockDefinition::block(
                 "block.planks",
                 true,
