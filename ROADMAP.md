@@ -63,7 +63,7 @@ refined as adjacent systems mature.
 - [x] Transparent block pass for water/glass/leaves
 - [x] Ambient occlusion in chunk mesh vertex shading
 - [x] Frustum culling for chunks outside view
-- [ ] Simple chunk render distance control
+- [x] Simple chunk render distance control
 
 ## Phase 6 - Terrain Generation
 - [ ] Deterministic world seed

@@ -20,6 +20,7 @@ pub struct DebugOverlay {
     facing: String,
     visible_meshes: usize,
     culled_meshes: usize,
+    render_distance_chunks: i32,
 }
 
 impl DebugOverlay {
@@ -57,11 +58,16 @@ impl DebugOverlay {
         self.culled_meshes = culled_meshes;
     }
 
+    /// Updates the chunk render distance diagnostic shown by F3.
+    pub fn set_render_distance(&mut self, chunks: i32) {
+        self.render_distance_chunks = chunks;
+    }
+
     /// Text rendered by the overlay when visible.
     pub fn text(&self) -> Option<String> {
         self.visible.then(|| {
             format!(
-                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}\nMESHES: {} VISIBLE, {} CULLED",
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}\nRENDER DISTANCE: {} CHUNKS\nMESHES: {} VISIBLE, {} CULLED",
                 self.fps,
                 self.frame_ms,
                 self.player_position.x,
@@ -70,6 +76,7 @@ impl DebugOverlay {
                 chunk_coord(self.player_position.x),
                 chunk_coord(self.player_position.z),
                 self.facing,
+                self.render_distance_chunks,
                 self.visible_meshes,
                 self.culled_meshes,
             )

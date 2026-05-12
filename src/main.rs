@@ -45,6 +45,9 @@ const FIXED_TIMESTEP: Duration = Duration::from_nanos(1_000_000_000 / GAME_TICK_
 const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
 const FREE_FLY_SPEED: f32 = 6.0;
 const FREE_FLY_ACCELERATION: f32 = 18.0;
+const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
+const MAX_RENDER_DISTANCE_CHUNKS: i32 = 8;
+const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 2;
 
 /// Top-level application state owned by the winit event loop.
 ///
@@ -64,6 +67,8 @@ struct App {
     last_frame_update: Instant,
     fixed_update_accumulator: Duration,
     free_fly_velocity: Vec3,
+    render_distance_chunks: i32,
+    mesh_center_chunk: world::ChunkPos,
 }
 
 impl ApplicationHandler for App {
@@ -108,11 +113,7 @@ impl ApplicationHandler for App {
         self.window = Some(w);
         self.renderer = Some(renderer);
         self.camera = Some(camera);
-
-        // Build chunk meshes and replace debug shapes.
-        if let Some(ref mut renderer) = self.renderer {
-            build_chunk_meshes(renderer, &block_models, &self.world);
-        }
+        self.rebuild_chunk_meshes(true);
     }
 
     fn window_event(
@@ -133,6 +134,10 @@ impl ApplicationHandler for App {
         self.input.handle_window_event(&event);
         if self.input.take_debug_overlay_toggle_requested() {
             self.debug_overlay.toggle();
+        }
+        if self.input.is_f3_pressed() && self.input.was_key_just_pressed(KeyCode::KeyF) {
+            let delta = if self.input.is_shift_pressed() { -1 } else { 1 };
+            self.adjust_render_distance(delta);
         }
 
         match event {
@@ -263,7 +268,10 @@ impl App {
             renderer.set_view_projection(camera.view_projection());
             self.debug_overlay.set_player_position(camera.position());
             self.debug_overlay.set_facing(camera.facing_name());
+            self.debug_overlay
+                .set_render_distance(self.render_distance_chunks);
         }
+        self.rebuild_chunk_meshes(false);
     }
 
     fn update_free_fly_movement(&mut self, dt: Duration) {
@@ -292,6 +300,47 @@ impl App {
             window.set_pointer_locked(locked);
         }
     }
+
+    fn adjust_render_distance(&mut self, delta: i32) {
+        let next = (self.render_distance_chunks + delta)
+            .clamp(MIN_RENDER_DISTANCE_CHUNKS, MAX_RENDER_DISTANCE_CHUNKS);
+        if next == self.render_distance_chunks {
+            return;
+        }
+
+        self.render_distance_chunks = next;
+        self.debug_overlay.set_render_distance(next);
+
+        self.rebuild_chunk_meshes(true);
+
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn rebuild_chunk_meshes(&mut self, force: bool) {
+        let Some(camera) = &self.camera else {
+            return;
+        };
+        let center_chunk = camera_chunk_pos(camera.position());
+        if !force && center_chunk == self.mesh_center_chunk {
+            return;
+        }
+
+        let (Some(renderer), Some(block_models)) = (&mut self.renderer, self.block_models.as_ref())
+        else {
+            return;
+        };
+
+        build_chunk_meshes(
+            renderer,
+            block_models,
+            &self.world,
+            center_chunk,
+            self.render_distance_chunks,
+        );
+        self.mesh_center_chunk = center_chunk;
+    }
 }
 
 /// Creates a demo world, builds chunk meshes, and sets them on the renderer.
@@ -299,6 +348,8 @@ fn build_chunk_meshes(
     renderer: &mut renderer::Renderer,
     block_models: &crate::registry::Registry<model::BlockModel>,
     world: &world::World,
+    center_chunk: world::ChunkPos,
+    render_distance_chunks: i32,
 ) {
     // Build a path → model lookup map.
     use std::collections::HashMap;
@@ -313,6 +364,14 @@ fn build_chunk_meshes(
     let mut meshes = Vec::new();
 
     for chunk in world.chunks() {
+        let pos = chunk.pos();
+        let distance = (pos.0 - center_chunk.0)
+            .abs()
+            .max((pos.1 - center_chunk.1).abs());
+        if distance > render_distance_chunks {
+            continue;
+        }
+
         let data = mesher::mesh_chunk(chunk, &model_map, &renderer.atlas);
         if data.vertices.is_empty() {
             continue;
@@ -329,8 +388,15 @@ fn build_chunk_meshes(
         meshes.push(mesh);
     }
 
-    log::info!(target: "mesher", "Built {} chunk meshes from demo world", meshes.len());
+    log::info!(target: "mesher", "Built {} chunk meshes within render distance {render_distance_chunks}", meshes.len());
     renderer.set_chunk_meshes(meshes);
+}
+
+fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
+    world::ChunkPos(
+        ((position.x + 8.0).floor() as i32).div_euclid(world::CHUNK_SIZE_X as i32),
+        ((position.z + 8.0).floor() as i32).div_euclid(world::CHUNK_SIZE_Z as i32),
+    )
 }
 
 fn create_demo_world() -> world::World {
@@ -578,6 +644,8 @@ fn main() {
         last_frame_update: Instant::now(),
         fixed_update_accumulator: Duration::ZERO,
         free_fly_velocity: Vec3::ZERO,
+        render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
+        mesh_center_chunk: world::ChunkPos(0, 0),
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }

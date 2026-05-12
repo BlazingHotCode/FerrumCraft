@@ -18,6 +18,7 @@ pub struct InputState {
     cursor_position: Option<(f64, f64)>,
     cursor_delta: (f64, f64),
     debug_overlay_toggle_requested: bool,
+    f3_chord_pressed: bool,
 }
 
 impl InputState {
@@ -25,26 +26,30 @@ impl InputState {
     pub fn handle_window_event(&mut self, event: &WindowEvent) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed
-                    && !event.repeat
-                    && (matches!(event.logical_key, Key::Named(NamedKey::F3))
-                        || matches!(event.physical_key, PhysicalKey::Code(KeyCode::F3)))
-                {
-                    self.debug_overlay_toggle_requested = true;
-                }
-
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
                 };
 
+                let f3_key =
+                    matches!(event.logical_key, Key::Named(NamedKey::F3)) || code == KeyCode::F3;
+
                 match event.state {
                     ElementState::Pressed => {
+                        if !event.repeat && !f3_key && self.is_f3_pressed() {
+                            self.f3_chord_pressed = true;
+                        }
                         if !self.pressed_keys.contains(&code) {
                             self.just_pressed_keys.insert(code);
                         }
                         self.pressed_keys.insert(code);
                     }
                     ElementState::Released => {
+                        if f3_key && !self.f3_chord_pressed {
+                            self.debug_overlay_toggle_requested = true;
+                        }
+                        if f3_key {
+                            self.f3_chord_pressed = false;
+                        }
                         self.pressed_keys.remove(&code);
                     }
                 }
@@ -90,6 +95,17 @@ impl InputState {
         self.just_pressed_keys.contains(&key)
     }
 
+    /// Returns whether F3 is currently held for debug key chords.
+    pub fn is_f3_pressed(&self) -> bool {
+        self.pressed_keys.contains(&KeyCode::F3)
+    }
+
+    /// Returns whether either Shift key is currently held.
+    pub fn is_shift_pressed(&self) -> bool {
+        self.pressed_keys.contains(&KeyCode::ShiftLeft)
+            || self.pressed_keys.contains(&KeyCode::ShiftRight)
+    }
+
     /// Consumes whether the F3 debug overlay toggle was requested.
     pub fn take_debug_overlay_toggle_requested(&mut self) -> bool {
         let requested = self.debug_overlay_toggle_requested;
@@ -127,6 +143,7 @@ impl InputState {
         self.just_pressed_keys.clear();
         self.pressed_mouse_buttons.clear();
         self.debug_overlay_toggle_requested = false;
+        self.f3_chord_pressed = false;
         self.cursor_delta = (0.0, 0.0);
     }
 }
