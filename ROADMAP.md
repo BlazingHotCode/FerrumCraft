@@ -61,7 +61,7 @@ refined as adjacent systems mature.
 - [x] Basic block material/color mapping from model/block data
 - [x] Depth-tested opaque chunk pass
 - [x] Transparent block pass for water/glass/leaves
-- [ ] Ambient occlusion in chunk mesh vertex shading
+- [x] Ambient occlusion in chunk mesh vertex shading
 - [ ] Frustum culling for chunks outside view
 - [ ] Simple chunk render distance control
 

@@ -21,11 +21,13 @@ var block_texture: texture_2d<f32>;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) ao: f32,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
+    @location(1) ao: f32,
 };
 
 @vertex
@@ -33,11 +35,13 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.clip_position = camera.view_projection * vec4<f32>(input.position, 1.0);
     output.tex_coords = input.uv;
+    output.ao = input.ao;
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(block_texture, texture_sampler, input.tex_coords);
-    return tex_color * material.base_color;
+    let color = tex_color * material.base_color;
+    return vec4<f32>(color.rgb * input.ao, color.a);
 }

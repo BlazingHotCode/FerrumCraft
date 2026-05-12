@@ -347,6 +347,21 @@ fn create_demo_world() -> world::World {
     for y in 2..5 {
         world.set_block(world::BlockPos(2, y, 2), id("stone"));
     }
+    for x in 12..15 {
+        world.set_block(world::BlockPos(x, 2, 2), id("stone"));
+        world.set_block(world::BlockPos(x, 3, 2), id("stone"));
+    }
+    for z in 2..5 {
+        world.set_block(world::BlockPos(12, 2, z), id("stone"));
+        world.set_block(world::BlockPos(12, 3, z), id("stone"));
+    }
+    for y in 2..5 {
+        world.set_block(world::BlockPos(14, y, 4), id("stone"));
+        world.set_block(world::BlockPos(13, y, 4), id("stone"));
+        world.set_block(world::BlockPos(14, y, 3), id("stone"));
+    }
+    world.set_block(world::BlockPos(13, 4, 2), id("stone"));
+    world.set_block(world::BlockPos(12, 4, 3), id("stone"));
     for x in 10..14 {
         for z in 10..14 {
             world.set_block(world::BlockPos(x, 1, z), id("sand"));

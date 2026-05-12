@@ -29,7 +29,12 @@ fn face_visible(current: &BlockId, neighbor: &BlockId) -> bool {
 
 fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Quad) {
     verts.extend_from_slice(&q.vertices);
-    inds.extend_from_slice(&[*off, *off + 1, *off + 2, *off, *off + 2, *off + 3]);
+    let ao = q.vertices.map(|v| v.ao);
+    if ao[0] + ao[2] > ao[1] + ao[3] {
+        inds.extend_from_slice(&[*off, *off + 1, *off + 3, *off + 1, *off + 2, *off + 3]);
+    } else {
+        inds.extend_from_slice(&[*off, *off + 1, *off + 2, *off, *off + 2, *off + 3]);
+    }
     *off += 4;
 }
 
@@ -43,6 +48,88 @@ fn random_rotation(path: &str, x: usize, y: usize, z: usize, face: Face) -> u8 {
     h ^= (z as u32).wrapping_mul(0xC2B2_AE35);
     h ^= face as u32;
     ((h ^ (h >> 16)) & 3) as u8
+}
+
+fn occludes(blocks: &[BlockId], x: usize, y: usize, z: usize, dx: i32, dy: i32, dz: i32) -> bool {
+    let nx = x as i32 + dx;
+    let ny = y as i32 + dy;
+    let nz = z as i32 + dz;
+    if nx < 0 || ny < 0 || nz < 0 || nx >= SX as i32 || ny >= SY as i32 || nz >= SZ as i32 {
+        return false;
+    }
+
+    let block = &blocks[ny as usize * SLICE + nz as usize * SX + nx as usize];
+    !block.0.is_empty() && !is_transparent(block)
+}
+
+fn vertex_ao(
+    blocks: &[BlockId],
+    x: usize,
+    y: usize,
+    z: usize,
+    normal: [i32; 3],
+    side_a: [i32; 3],
+    side_b: [i32; 3],
+) -> f32 {
+    let side_1 = occludes(
+        blocks,
+        x,
+        y,
+        z,
+        normal[0] + side_a[0],
+        normal[1] + side_a[1],
+        normal[2] + side_a[2],
+    );
+    let side_2 = occludes(
+        blocks,
+        x,
+        y,
+        z,
+        normal[0] + side_b[0],
+        normal[1] + side_b[1],
+        normal[2] + side_b[2],
+    );
+    let corner = occludes(
+        blocks,
+        x,
+        y,
+        z,
+        normal[0] + side_a[0] + side_b[0],
+        normal[1] + side_a[1] + side_b[1],
+        normal[2] + side_a[2] + side_b[2],
+    );
+
+    let level = if side_1 && side_2 {
+        0
+    } else {
+        3 - side_1 as u8 - side_2 as u8 - corner as u8
+    };
+    [0.45, 0.62, 0.8, 1.0][level as usize]
+}
+
+fn face_ao(blocks: &[BlockId], x: usize, y: usize, z: usize, dir: u8) -> [f32; 4] {
+    let (normal, sides): ([i32; 3], [[i32; 3]; 4]) = match dir {
+        0 => ([1, 0, 0], [[0, -1, 0], [0, 1, 0], [0, 1, 0], [0, -1, 0]]),
+        1 => ([-1, 0, 0], [[0, -1, 0], [0, 1, 0], [0, 1, 0], [0, -1, 0]]),
+        2 => ([0, 1, 0], [[-1, 0, 0], [-1, 0, 0], [1, 0, 0], [1, 0, 0]]),
+        3 => ([0, -1, 0], [[-1, 0, 0], [-1, 0, 0], [1, 0, 0], [1, 0, 0]]),
+        4 => ([0, 0, 1], [[-1, 0, 0], [1, 0, 0], [1, 0, 0], [-1, 0, 0]]),
+        5 => ([0, 0, -1], [[1, 0, 0], [-1, 0, 0], [-1, 0, 0], [1, 0, 0]]),
+        _ => unreachable!(),
+    };
+    let other_sides: [[i32; 3]; 4] = match dir {
+        0 | 1 => [[0, 0, -1], [0, 0, -1], [0, 0, 1], [0, 0, 1]],
+        2 | 3 => [[0, 0, -1], [0, 0, 1], [0, 0, 1], [0, 0, -1]],
+        4 | 5 => [[0, -1, 0], [0, -1, 0], [0, 1, 0], [0, 1, 0]],
+        _ => unreachable!(),
+    };
+
+    [
+        vertex_ao(blocks, x, y, z, normal, sides[0], other_sides[0]),
+        vertex_ao(blocks, x, y, z, normal, sides[1], other_sides[1]),
+        vertex_ao(blocks, x, y, z, normal, sides[2], other_sides[2]),
+        vertex_ao(blocks, x, y, z, normal, sides[3], other_sides[3]),
+    ]
 }
 
 fn face_uv(
@@ -116,37 +203,91 @@ pub fn mesh_chunk(
                 // Right (+X)
                 if x + 1 >= SX || face_visible(block, &blocks[idx + 1]) {
                     let (uv, rotation) = face_uv(model, atlas, Face::Right, x, y, z);
-                    let q = quad(0, fx, fy, fz, uv, top_height, rotation);
+                    let q = quad(
+                        0,
+                        fx,
+                        fy,
+                        fz,
+                        uv,
+                        top_height,
+                        rotation,
+                        face_ao(blocks, x, y, z, 0),
+                    );
                     push_quad(verts, inds, off, q);
                 }
                 // Left (-X)
                 if x == 0 || face_visible(block, &blocks[idx - 1]) {
                     let (uv, rotation) = face_uv(model, atlas, Face::Left, x, y, z);
-                    let q = quad(1, fx, fy, fz, uv, top_height, rotation);
+                    let q = quad(
+                        1,
+                        fx,
+                        fy,
+                        fz,
+                        uv,
+                        top_height,
+                        rotation,
+                        face_ao(blocks, x, y, z, 1),
+                    );
                     push_quad(verts, inds, off, q);
                 }
                 // Top (+Y)
                 if y + 1 >= SY || face_visible(block, &blocks[idx + SLICE]) {
                     let (uv, rotation) = face_uv(model, atlas, Face::Top, x, y, z);
-                    let q = quad(2, fx, fy, fz, uv, top_height, rotation);
+                    let q = quad(
+                        2,
+                        fx,
+                        fy,
+                        fz,
+                        uv,
+                        top_height,
+                        rotation,
+                        face_ao(blocks, x, y, z, 2),
+                    );
                     push_quad(verts, inds, off, q);
                 }
                 // Bottom (-Y)
                 if y == 0 || face_visible(block, &blocks[idx - SLICE]) {
                     let (uv, rotation) = face_uv(model, atlas, Face::Bottom, x, y, z);
-                    let q = quad(3, fx, fy, fz, uv, top_height, rotation);
+                    let q = quad(
+                        3,
+                        fx,
+                        fy,
+                        fz,
+                        uv,
+                        top_height,
+                        rotation,
+                        face_ao(blocks, x, y, z, 3),
+                    );
                     push_quad(verts, inds, off, q);
                 }
                 // Front (+Z)
                 if z + 1 >= SZ || face_visible(block, &blocks[idx + SX]) {
                     let (uv, rotation) = face_uv(model, atlas, Face::Front, x, y, z);
-                    let q = quad(4, fx, fy, fz, uv, top_height, rotation);
+                    let q = quad(
+                        4,
+                        fx,
+                        fy,
+                        fz,
+                        uv,
+                        top_height,
+                        rotation,
+                        face_ao(blocks, x, y, z, 4),
+                    );
                     push_quad(verts, inds, off, q);
                 }
                 // Back (-Z)
                 if z == 0 || face_visible(block, &blocks[idx - SX]) {
                     let (uv, rotation) = face_uv(model, atlas, Face::Back, x, y, z);
-                    let q = quad(5, fx, fy, fz, uv, top_height, rotation);
+                    let q = quad(
+                        5,
+                        fx,
+                        fy,
+                        fz,
+                        uv,
+                        top_height,
+                        rotation,
+                        face_ao(blocks, x, y, z, 5),
+                    );
                     push_quad(verts, inds, off, q);
                 }
             }
@@ -168,7 +309,16 @@ struct Quad {
     vertices: [Vertex; 4],
 }
 
-fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32, rotation: u8) -> Quad {
+fn quad(
+    dir: u8,
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    uv: [f32; 4],
+    top_height: f32,
+    rotation: u8,
+    ao: [f32; 4],
+) -> Quad {
     let [u0, v0, u1, v1] = uv;
     let off = |v: [f32; 3]| [v[0] + ox - 8.0, v[1] + oy, v[2] + oz - 8.0];
     // Each face: (a,b,c,d) where triangles are a→b→c and a→c→d (CCW outside).
@@ -244,18 +394,22 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32, rotat
             Vertex {
                 position: off(verts[0]),
                 uv: uvs[0],
+                ao: ao[0],
             },
             Vertex {
                 position: off(verts[1]),
                 uv: uvs[1],
+                ao: ao[1],
             },
             Vertex {
                 position: off(verts[2]),
                 uv: uvs[2],
+                ao: ao[2],
             },
             Vertex {
                 position: off(verts[3]),
                 uv: uvs[3],
+                ao: ao[3],
             },
         ],
     }
