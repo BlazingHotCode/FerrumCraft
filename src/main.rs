@@ -19,6 +19,7 @@ mod model;
 mod registry;
 mod renderer;
 mod resource;
+mod tag;
 mod window;
 
 use std::time::{Duration, Instant};
@@ -311,6 +312,17 @@ fn main() {
     // Load blockstate definitions for each non-air block.
     let blockstates = model::load_blockstates(&_resources, "ferrumcraft", &block_ids);
     log::info!(target: "blockstates", "Loaded {} blockstate definitions", blockstates.len());
+
+    // Load tags.
+    match tag::load_tag(
+        &_resources,
+        "ferrumcraft",
+        resource::ResourceCategory::BlockTag,
+        "solid",
+    ) {
+        Ok(t) => log::info!(target: "tags", "Loaded 'solid' tag with {} entries", t.len()),
+        Err(e) => log::warn!(target: "tags", "Failed to load 'solid' tag: {e}"),
+    }
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);

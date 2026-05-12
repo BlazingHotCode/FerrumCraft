@@ -34,7 +34,7 @@ refined as adjacent systems mature.
 - [x] Item model JSON files (`assets/<namespace>/models/item/*.json`)
 - [x] Blockstate JSON files for mapping block properties to models
 - [ ] Texture references in models (`assets/<namespace>/textures/...`)
-- [ ] Tags for grouping blocks/items (`data/<namespace>/tags/...`)
+- [x] Tags for grouping blocks/items (`data/<namespace>/tags/...`)
 - [ ] JSON schema validation for every data/resource file type
 - [ ] Data validation with useful missing/invalid resource errors
 - [ ] Built-in `ferrumcraft` resource pack loaded by default
