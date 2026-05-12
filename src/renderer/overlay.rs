@@ -1,9 +1,97 @@
-//! Minimal debug overlay renderer.
+//! Debug overlay renderer with a 5x7 bitmap font loaded from a JSON resource.
 //!
-//! This intentionally uses a tiny built-in 5x7 bitmap font so F3 diagnostics do
-//! not depend on a UI or font asset pipeline yet.
+//! The font file is at `assets/<namespace>/font/5x7.json` and contains glyph
+//! definitions for printable ASCII characters. Each glyph is 7 rows of 5 bits.
+
+use std::collections::HashMap;
 
 use wgpu::util::DeviceExt;
+
+use crate::resource::{ResourceCategory, ResourceManager};
+
+/// A 5x7 bitmap font loaded from a JSON resource.
+#[derive(Clone, Debug)]
+pub struct Font {
+    glyphs: HashMap<char, [String; 7]>,
+}
+
+impl Font {
+    /// Loads a font from a JSON resource file.
+    pub fn load(resources: &ResourceManager, namespace: &str) -> Result<Self, FontError> {
+        let raw: HashMap<String, Vec<String>> = resources
+            .read_json(namespace, ResourceCategory::Font, "5x7.json")
+            .map_err(|e| FontError::Load(e.to_string()))?;
+
+        let mut glyphs = HashMap::new();
+        for (key, rows) in raw {
+            if rows.len() != 7 {
+                continue;
+            }
+            // The key is a JSON string. If it's a single character, use it directly.
+            // Some chars might be encoded as unicode escapes - they're already decoded by serde.
+            let chars: Vec<char> = key.chars().collect();
+            if chars.len() == 1 {
+                let arr: [String; 7] = [
+                    rows[0].clone(),
+                    rows[1].clone(),
+                    rows[2].clone(),
+                    rows[3].clone(),
+                    rows[4].clone(),
+                    rows[5].clone(),
+                    rows[6].clone(),
+                ];
+                glyphs.insert(chars[0], arr);
+            }
+        }
+
+        Ok(Self { glyphs })
+    }
+
+    /// Creates an empty font (no glyphs will render).
+    pub fn new_empty() -> Self {
+        Self {
+            glyphs: HashMap::new(),
+        }
+    }
+
+    /// Number of loaded glyphs.
+    pub fn glyph_count(&self) -> usize {
+        self.glyphs.len()
+    }
+
+    /// Returns the 7-row bitmap for a character, or a fallback for missing chars.
+    pub fn glyph(&self, ch: char) -> &[String; 7] {
+        use std::sync::OnceLock;
+        static FALLBACK: OnceLock<[String; 7]> = OnceLock::new();
+        self.glyphs
+            .get(&ch)
+            .or_else(|| {
+                let upper = ch.to_ascii_uppercase();
+                if upper != ch {
+                    self.glyphs.get(&upper)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| FALLBACK.get_or_init(|| std::array::from_fn(|_| String::new())))
+    }
+}
+
+/// Errors that can occur during font loading.
+#[derive(Debug)]
+pub enum FontError {
+    Load(String),
+}
+
+impl std::fmt::Display for FontError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Load(s) => write!(f, "font loading error: {s}"),
+        }
+    }
+}
+
+impl std::error::Error for FontError {}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -37,11 +125,12 @@ impl OverlayVertex {
 #[derive(Debug)]
 pub struct OverlayRenderer {
     pipeline: wgpu::RenderPipeline,
+    font: Font,
 }
 
 impl OverlayRenderer {
     /// Creates the overlay pipeline for the swapchain format.
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat, font: Font) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Debug overlay shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("overlay.wgsl").into()),
@@ -73,7 +162,7 @@ impl OverlayRenderer {
             cache: None,
         });
 
-        Self { pipeline }
+        Self { pipeline, font }
     }
 
     /// Draws overlay text into the current frame after the 3D pass.
@@ -86,7 +175,7 @@ impl OverlayRenderer {
         height: u32,
         text: &str,
     ) {
-        let vertices = text_vertices(text, width.max(1) as f32, height.max(1) as f32);
+        let vertices = text_vertices(&self.font, text, width.max(1) as f32, height.max(1) as f32);
         if vertices.is_empty() {
             return;
         }
@@ -118,7 +207,7 @@ impl OverlayRenderer {
     }
 }
 
-fn text_vertices(text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {
+fn text_vertices(font: &Font, text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {
     const SCALE: f32 = 3.0;
     const GLYPH_W: f32 = 5.0;
     const GLYPH_H: f32 = 7.0;
@@ -141,6 +230,7 @@ fn text_vertices(text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {
 
         push_glyph(
             &mut vertices,
+            font,
             ch,
             x + SCALE,
             y + SCALE,
@@ -149,7 +239,7 @@ fn text_vertices(text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {
             height,
             SHADOW,
         );
-        push_glyph(&mut vertices, ch, x, y, SCALE, width, height, COLOR);
+        push_glyph(&mut vertices, font, ch, x, y, SCALE, width, height, COLOR);
         x += (GLYPH_W + GAP) * SCALE;
     }
 
@@ -158,6 +248,7 @@ fn text_vertices(text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {
 
 fn push_glyph(
     vertices: &mut Vec<OverlayVertex>,
+    font: &Font,
     ch: char,
     x: f32,
     y: f32,
@@ -166,7 +257,7 @@ fn push_glyph(
     height: f32,
     color: [f32; 4],
 ) {
-    for (row, pattern) in glyph(ch).iter().enumerate() {
+    for (row, pattern) in font.glyph(ch).iter().enumerate() {
         for (col, pixel) in pattern.bytes().enumerate() {
             if pixel == b'1' {
                 push_quad(
@@ -224,132 +315,4 @@ fn push_quad(
             color,
         },
     ]);
-}
-
-fn glyph(ch: char) -> [&'static str; 7] {
-    match ch {
-        '0' => [
-            "01110", "10001", "10011", "10101", "11001", "10001", "01110",
-        ],
-        '1' => [
-            "00100", "01100", "00100", "00100", "00100", "00100", "01110",
-        ],
-        '2' => [
-            "01110", "10001", "00001", "00010", "00100", "01000", "11111",
-        ],
-        '3' => [
-            "11110", "00001", "00001", "01110", "00001", "00001", "11110",
-        ],
-        '4' => [
-            "00010", "00110", "01010", "10010", "11111", "00010", "00010",
-        ],
-        '5' => [
-            "11111", "10000", "10000", "11110", "00001", "00001", "11110",
-        ],
-        '6' => [
-            "01110", "10000", "10000", "11110", "10001", "10001", "01110",
-        ],
-        '7' => [
-            "11111", "00001", "00010", "00100", "01000", "01000", "01000",
-        ],
-        '8' => [
-            "01110", "10001", "10001", "01110", "10001", "10001", "01110",
-        ],
-        '9' => [
-            "01110", "10001", "10001", "01111", "00001", "00001", "01110",
-        ],
-        'A' => [
-            "01110", "10001", "10001", "11111", "10001", "10001", "10001",
-        ],
-        'B' => [
-            "11110", "10001", "10001", "11110", "10001", "10001", "11110",
-        ],
-        'C' => [
-            "01111", "10000", "10000", "10000", "10000", "10000", "01111",
-        ],
-        'D' => [
-            "11110", "10001", "10001", "10001", "10001", "10001", "11110",
-        ],
-        'E' => [
-            "11111", "10000", "10000", "11110", "10000", "10000", "11111",
-        ],
-        'F' => [
-            "11111", "10000", "10000", "11110", "10000", "10000", "10000",
-        ],
-        'G' => [
-            "01111", "10000", "10000", "10011", "10001", "10001", "01111",
-        ],
-        'H' => [
-            "10001", "10001", "10001", "11111", "10001", "10001", "10001",
-        ],
-        'K' => [
-            "10001", "10010", "10100", "11000", "10100", "10010", "10001",
-        ],
-        'L' => [
-            "10000", "10000", "10000", "10000", "10000", "10000", "11111",
-        ],
-        'M' => [
-            "10001", "11011", "10101", "10101", "10001", "10001", "10001",
-        ],
-        'N' => [
-            "10001", "11001", "10101", "10011", "10001", "10001", "10001",
-        ],
-        'P' => [
-            "11110", "10001", "10001", "11110", "10000", "10000", "10000",
-        ],
-        'R' => [
-            "11110", "10001", "10001", "11110", "10100", "10010", "10001",
-        ],
-        'S' => [
-            "01111", "10000", "10000", "01110", "00001", "00001", "11110",
-        ],
-        'U' => [
-            "10001", "10001", "10001", "10001", "10001", "10001", "01110",
-        ],
-        'Y' => [
-            "10001", "10001", "01010", "00100", "00100", "00100", "00100",
-        ],
-        'I' => [
-            "01110", "00100", "00100", "00100", "00100", "00100", "01110",
-        ],
-        'O' => [
-            "01110", "10001", "10001", "10001", "10001", "10001", "01110",
-        ],
-        'T' => [
-            "11111", "00100", "00100", "00100", "00100", "00100", "00100",
-        ],
-        'X' => [
-            "10001", "10001", "01010", "00100", "01010", "10001", "10001",
-        ],
-        'Z' => [
-            "11111", "00001", "00010", "00100", "01000", "10000", "11111",
-        ],
-        '(' => [
-            "00010", "00100", "01000", "01000", "01000", "00100", "00010",
-        ],
-        ')' => [
-            "01000", "00100", "00010", "00010", "00010", "00100", "01000",
-        ],
-        '+' => [
-            "00000", "00100", "00100", "11111", "00100", "00100", "00000",
-        ],
-        '-' => [
-            "00000", "00000", "00000", "11111", "00000", "00000", "00000",
-        ],
-        ':' => [
-            "00000", "00100", "00100", "00000", "00100", "00100", "00000",
-        ],
-        '.' => [
-            "00000", "00000", "00000", "00000", "00000", "01100", "01100",
-        ],
-        '/' => [
-            "00001", "00010", "00010", "00100", "01000", "01000", "10000",
-        ],
-        ' ' => [
-            "00000", "00000", "00000", "00000", "00000", "00000", "00000",
-        ],
-        _ => [
-            "11111", "00001", "00010", "00100", "00000", "00100", "00100",
-        ],
-    }
 }

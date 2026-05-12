@@ -4,6 +4,8 @@
 //! pipelines. It coordinates frame acquisition and submission, while the
 //! submodules own scene data, mesh data, and render-pass encoding details.
 
+pub use overlay::Font;
+
 mod material;
 mod mesh;
 mod overlay;
@@ -38,7 +40,7 @@ pub struct Renderer {
 
 impl Renderer {
     /// Creates the surface, selects an adapter, and initializes renderer state.
-    pub async fn new(window: Arc<Window>, view_projection: Mat4) -> Self {
+    pub async fn new(window: Arc<Window>, view_projection: Mat4, font: Font) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let size = window.inner_size();
         let surface = instance
@@ -69,7 +71,7 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let pipelines = RenderPipelines::new(&device, config.format);
-        let overlay = OverlayRenderer::new(&device, config.format);
+        let overlay = OverlayRenderer::new(&device, config.format, font);
         let depth_view = create_depth_view(&device, config.width, config.height);
         let scene = Scene::new(&device, pipelines.material_layout(), view_projection);
 

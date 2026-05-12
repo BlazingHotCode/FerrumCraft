@@ -29,6 +29,7 @@ use camera::FirstPersonCamera;
 use debug::DebugOverlay;
 use glam::Vec3;
 use input::InputState;
+use renderer::Font;
 use winit::application::ApplicationHandler;
 use winit::event::DeviceEvent;
 use winit::event::MouseButton;
@@ -52,6 +53,7 @@ struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
     camera: Option<FirstPersonCamera>,
+    font: Option<Font>,
     input: InputState,
     debug_overlay: DebugOverlay,
     pointer_locked: bool,
@@ -70,9 +72,14 @@ impl ApplicationHandler for App {
         let w = window::Window::new(event_loop).expect("Failed to create window");
         let size = w.inner.inner_size();
         let camera = FirstPersonCamera::new(size.width, size.height);
+        let font = self
+            .font
+            .take()
+            .expect("Font must be loaded before renderer creation");
         let renderer = pollster::block_on(renderer::Renderer::new(
             w.inner.clone(),
             camera.view_projection(),
+            font,
         ));
         self.window = Some(w);
         self.renderer = Some(renderer);
@@ -349,6 +356,19 @@ fn main() {
     // Data validation.
     validate_data(&block_registry, &block_models, &blockstates, &_resources);
 
+    // Load font for the debug overlay.
+    let font = match Font::load(&_resources, "ferrumcraft") {
+        Ok(f) => {
+            log::info!(target: "startup", "Loaded bitmap font with {} glyphs", f.glyph_count());
+            f
+        }
+        Err(e) => {
+            log::warn!(target: "startup", "Failed to load font: {e}");
+            // Fallback: will render nothing if font unavailable
+            Font::new_empty()
+        }
+    };
+
     // Create a demo world and place some blocks.
     let mut world = world::World::new();
     world.load_chunk(world::ChunkPos(0, 0));
@@ -388,6 +408,7 @@ fn main() {
         window: None,
         renderer: None,
         camera: None,
+        font: Some(font),
         input: InputState::default(),
         debug_overlay: DebugOverlay::default(),
         pointer_locked: false,

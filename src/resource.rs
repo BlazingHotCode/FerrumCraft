@@ -36,6 +36,7 @@ pub enum ResourceCategory {
     BlockModel,
     ItemModel,
     Blockstate,
+    Font,
     BlockTag,
     ItemTag,
     Recipe,
@@ -50,6 +51,7 @@ impl ResourceCategory {
             Self::BlockModel => "models/block",
             Self::ItemModel => "models/item",
             Self::Blockstate => "blockstates",
+            Self::Font => "font",
             Self::BlockTag => "tags/blocks",
             Self::ItemTag => "tags/items",
             Self::Recipe => "recipes",
@@ -59,9 +61,12 @@ impl ResourceCategory {
 
     fn domain(&self) -> ResourceDomain {
         match self {
-            Self::Lang | Self::Texture | Self::BlockModel | Self::ItemModel | Self::Blockstate => {
-                ResourceDomain::Assets
-            }
+            Self::Lang
+            | Self::Texture
+            | Self::BlockModel
+            | Self::ItemModel
+            | Self::Blockstate
+            | Self::Font => ResourceDomain::Assets,
             Self::BlockTag | Self::ItemTag | Self::Recipe | Self::LootTable => ResourceDomain::Data,
         }
     }
