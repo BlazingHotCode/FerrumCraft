@@ -16,7 +16,7 @@ refined as adjacent systems mature.
 - [x] Event loop integration (resize, redraw, input plumbing)
 - [x] Basic shaders + material/color pipeline
 - [x] Fixed timestep game update loop
-- [ ] Debug overlay (FPS, frame time, player/chunk position)
+- [x] Debug overlay (FPS, frame time, player/chunk position)
 
 ## Phase 2 - First-Person Player
 - [ ] First-person camera with view/projection matrices

@@ -1,0 +1,47 @@
+//! Runtime debug overlay state.
+//!
+//! The overlay mirrors Minecraft's F3-style diagnostics at a small scale. It is
+//! intentionally independent of rendering so gameplay systems can add player and
+//! chunk data here as those systems land.
+
+use std::time::Duration;
+
+/// User-toggleable debug data shown by the overlay.
+#[derive(Debug, Default)]
+pub struct DebugOverlay {
+    visible: bool,
+    frame_count: u32,
+    fps_elapsed: Duration,
+    fps: u32,
+    frame_ms: f32,
+}
+
+impl DebugOverlay {
+    /// Toggles F3 diagnostics on or off.
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+    }
+
+    /// Records the completed render frame for FPS/frame-time reporting.
+    pub fn record_frame(&mut self, frame_time: Duration) {
+        self.frame_ms = frame_time.as_secs_f32() * 1000.0;
+        self.frame_count += 1;
+        self.fps_elapsed += frame_time;
+
+        if self.fps_elapsed >= Duration::from_secs(1) {
+            self.fps = self.frame_count;
+            self.frame_count = 0;
+            self.fps_elapsed = Duration::ZERO;
+        }
+    }
+
+    /// Text rendered by the overlay when visible.
+    pub fn text(&self) -> Option<String> {
+        self.visible.then(|| {
+            format!(
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPLAYER: N/A\nCHUNK: N/A",
+                self.fps, self.frame_ms
+            )
+        })
+    }
+}

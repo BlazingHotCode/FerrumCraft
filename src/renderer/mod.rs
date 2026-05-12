@@ -6,11 +6,13 @@
 
 mod material;
 mod mesh;
+mod overlay;
 mod pipeline;
 mod scene;
 
 use std::sync::Arc;
 
+use overlay::OverlayRenderer;
 use pipeline::{RenderPipelines, depth_format};
 use scene::Scene;
 use winit::window::Window;
@@ -30,6 +32,7 @@ pub struct Renderer {
     depth_view: wgpu::TextureView,
     scene: Scene,
     pipelines: RenderPipelines,
+    overlay: OverlayRenderer,
 }
 
 impl Renderer {
@@ -61,6 +64,7 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let pipelines = RenderPipelines::new(&device, config.format);
+        let overlay = OverlayRenderer::new(&device, config.format);
         let depth_view = create_depth_view(&device, config.width, config.height);
         let scene = Scene::new(
             &device,
@@ -77,6 +81,7 @@ impl Renderer {
             depth_view,
             scene,
             pipelines,
+            overlay,
         }
     }
 
@@ -93,7 +98,7 @@ impl Renderer {
     }
 
     /// Encodes and presents one frame.
-    pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&self, debug_text: Option<&str>) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
         let view = frame
             .texture
@@ -110,6 +115,17 @@ impl Renderer {
             &self.depth_view,
             &self.scene,
         );
+
+        if let Some(text) = debug_text {
+            self.overlay.encode(
+                &self.device,
+                &mut encoder,
+                &view,
+                self.config.width,
+                self.config.height,
+                text,
+            );
+        }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();

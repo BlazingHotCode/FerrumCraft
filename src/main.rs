@@ -4,12 +4,14 @@
 //! and renderer frame loop. Game state should move into dedicated modules as it
 //! grows; this file should stay focused on top-level orchestration.
 
+mod debug;
 mod input;
 mod renderer;
 mod window;
 
 use std::time::{Duration, Instant};
 
+use debug::DebugOverlay;
 use input::InputState;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -29,6 +31,7 @@ struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
     input: InputState,
+    debug_overlay: DebugOverlay,
     last_update: Instant,
     fixed_update_accumulator: Duration,
 }
@@ -59,6 +62,9 @@ impl ApplicationHandler for App {
         }
 
         self.input.handle_window_event(&event);
+        if self.input.take_debug_overlay_toggle_requested() {
+            self.debug_overlay.toggle();
+        }
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -70,8 +76,13 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = &mut self.renderer {
-                    match renderer.render() {
-                        Ok(()) => self.input.end_frame(),
+                    let frame_start = Instant::now();
+                    let debug_text = self.debug_overlay.text();
+                    match renderer.render(debug_text.as_deref()) {
+                        Ok(()) => {
+                            self.debug_overlay.record_frame(frame_start.elapsed());
+                            self.input.end_frame();
+                        }
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                             let size = window.inner.inner_size();
                             renderer.resize(size.width, size.height);
@@ -127,6 +138,7 @@ fn main() {
         window: None,
         renderer: None,
         input: InputState::default(),
+        debug_overlay: DebugOverlay::default(),
         last_update: Instant::now(),
         fixed_update_accumulator: Duration::ZERO,
     };
