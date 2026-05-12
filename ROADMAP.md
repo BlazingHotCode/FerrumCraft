@@ -41,10 +41,10 @@ refined as adjacent systems mature.
 - [ ] Stable save IDs use namespaced strings instead of runtime registry indexes
 
 ## Phase 4 - Blocks And World Data
-- [ ] Block registry populated from data/resource definitions
-- [ ] Block display names resolved through lang keys
-- [ ] Core blocks: air, grass, dirt, stone, sand, water, log, leaves, planks, glass
-- [ ] Block properties: solid, opaque, transparent, liquid, hardness, drops, light emission
+- [x] Block registry populated from data/resource definitions
+- [x] Block display names resolved through lang keys
+- [x] Core blocks: air, grass, dirt, stone, sand, water, log, leaves, planks, glass
+- [x] Block properties: solid, opaque, transparent, liquid, hardness, light emission
 - [ ] Data-driven block components (collision, flammable, gravity affected, inventory, smelting, etc.)
 - [ ] Blockstate property schemas defining allowed values (axis, facing, waterlogged, growth, etc.)
 - [ ] Blockstate storage for property variants (axis, facing, waterlogged, growth, etc.)

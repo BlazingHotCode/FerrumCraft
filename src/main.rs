@@ -8,6 +8,7 @@
 // Remove this once gameplay systems use the registries and resource manager.
 #![allow(dead_code)]
 
+mod block;
 mod camera;
 mod debug;
 mod id;
@@ -278,10 +279,19 @@ fn main() {
     // Set FERRUM_LOG=debug to see more detail.
 
     let _resources = resource::ResourceManager::new(".");
-    match lang::TranslationTable::load(&_resources, "ferrumcraft", "en_us") {
-        Ok(table) => log::info!(target: "lang", "Loaded {} translation entries", table.len()),
-        Err(e) => log::warn!(target: "lang", "Failed to load translations: {e}"),
-    }
+    let _lang_table = match lang::TranslationTable::load(&_resources, "ferrumcraft", "en_us") {
+        Ok(table) => {
+            log::info!(target: "lang", "Loaded {} translation entries", table.len());
+            table
+        }
+        Err(e) => {
+            log::warn!(target: "lang", "Failed to load translations: {e}");
+            lang::TranslationTable::empty()
+        }
+    };
+
+    let block_registry = block::register_core_blocks();
+    log::info!(target: "blocks", "Registered {} core block types", block_registry.len());
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
