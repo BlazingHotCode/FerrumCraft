@@ -12,6 +12,7 @@ mod camera;
 mod debug;
 mod id;
 mod input;
+mod lang;
 mod logging;
 mod registry;
 mod renderer;
@@ -275,6 +276,12 @@ fn main() {
     logging::init().expect("Failed to initialize logger");
     log::info!(target: "startup", "FerrumCraft v{} initializing", env!("CARGO_PKG_VERSION"));
     // Set FERRUM_LOG=debug to see more detail.
+
+    let _resources = resource::ResourceManager::new(".");
+    match lang::TranslationTable::load(&_resources, "ferrumcraft", "en_us") {
+        Ok(table) => log::info!(target: "lang", "Loaded {} translation entries", table.len()),
+        Err(e) => log::warn!(target: "lang", "Failed to load translations: {e}"),
+    }
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
