@@ -324,6 +324,9 @@ fn main() {
         Err(e) => log::warn!(target: "tags", "Failed to load 'solid' tag: {e}"),
     }
 
+    // Data validation.
+    validate_data(&block_registry, &block_models, &blockstates, &_resources);
+
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
@@ -339,4 +342,49 @@ fn main() {
         free_fly_velocity: Vec3::ZERO,
     };
     event_loop.run_app(&mut app).expect("Event loop error");
+}
+
+/// Runs startup validation checks on loaded data.
+fn validate_data(
+    block_registry: &crate::registry::Registry<block::BlockDefinition>,
+    block_models: &crate::registry::Registry<model::BlockModel>,
+    blockstates: &crate::registry::Registry<model::BlockState>,
+    _resources: &resource::ResourceManager,
+) {
+    // Validate that each block has a corresponding model.
+    for (id, _def) in block_registry.iter() {
+        if id.path() == "air" {
+            continue;
+        }
+        if !block_models.contains(id) {
+            log::warn!(target: "validation", "Block {id} has no block model");
+        }
+        let _ = blockstates.get(id).map(|state| {
+            if !block_models.iter().any(|(mid, _)| mid.path() == state.model.strip_prefix("block/").unwrap_or("")) {
+                log::warn!(target: "validation", "Blockstate for {id} references unknown model '{}'", state.model);
+            }
+        });
+    }
+
+    // Collect unique texture paths from all block models.
+    let mut texture_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (_id, model) in block_models.iter() {
+        for face in &model::ALL_FACES {
+            let tex = model.texture(*face);
+            if !tex.is_empty() {
+                texture_paths.insert(tex.to_string());
+            }
+        }
+    }
+
+    log::info!(target: "validation", "Collected {} unique texture paths from models", texture_paths.len());
+    for path in &texture_paths {
+        let full_path = format!("assets/ferrumcraft/textures/{}.png", path);
+        if !std::path::Path::new(&full_path).exists() {
+            log::warn!(target: "validation", "Missing texture: {full_path}");
+        }
+    }
+
+    // Log built-in resource pack.
+    log::info!(target: "startup", "Built-in resource pack 'ferrumcraft' loaded from ./assets and ./data");
 }
