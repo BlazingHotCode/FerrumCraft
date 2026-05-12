@@ -4,6 +4,7 @@
 //! pipelines. It coordinates frame acquisition and submission, while the
 //! submodules own scene data, mesh data, and render-pass encoding details.
 
+mod material;
 mod mesh;
 mod pipeline;
 mod scene;
@@ -59,9 +60,14 @@ impl Renderer {
             .expect("Failed to get default surface config");
         surface.configure(&device, &config);
 
-        let depth_view = create_depth_view(&device, config.width, config.height);
-        let scene = Scene::new(&device, config.width, config.height);
         let pipelines = RenderPipelines::new(&device, config.format);
+        let depth_view = create_depth_view(&device, config.width, config.height);
+        let scene = Scene::new(
+            &device,
+            pipelines.material_layout(),
+            config.width,
+            config.height,
+        );
 
         Self {
             device,

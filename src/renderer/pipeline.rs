@@ -25,6 +25,7 @@ pub struct RenderPipelines {
     static_mesh: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    material_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl RenderPipelines {
@@ -67,9 +68,24 @@ impl RenderPipelines {
             }],
         });
 
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Material bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Static mesh pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout, &material_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -113,7 +129,13 @@ impl RenderPipelines {
             static_mesh,
             camera_buffer,
             camera_bind_group,
+            material_bind_group_layout,
         }
+    }
+
+    /// Bind group layout required by static mesh materials.
+    pub fn material_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.material_bind_group_layout
     }
 
     /// Encodes the render passes needed to draw `scene` into `view`.
@@ -160,6 +182,7 @@ impl RenderPipelines {
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
             for mesh in scene.meshes() {
+                pass.set_bind_group(1, mesh.material().bind_group(), &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
                 pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..mesh.index_count(), 0, 0..1);

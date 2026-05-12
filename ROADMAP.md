@@ -11,7 +11,7 @@ expanded.
 - [x] Basic static 3D renderer (vertex/index buffers, depth testing, perspective projection)
 - [x] Built-in debug shapes (triangle, cube, plane)
 - [x] Event loop integration (resize, redraw, input plumbing)
-- [ ] Basic shaders + material/color pipeline
+- [x] Basic shaders + material/color pipeline
 
 ## Phase 2 — Camera & Controls
 - [ ] First-person camera (view/projection matrices)

@@ -6,12 +6,14 @@
 
 use wgpu::util::DeviceExt;
 
-/// One colored vertex in static mesh geometry.
+use super::material::Material;
+
+/// One vertex in static mesh geometry.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
+    tint: [f32; 3],
 }
 
 impl Vertex {
@@ -42,64 +44,72 @@ pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    material: Material,
 }
 
 impl Mesh {
     /// Creates a flat colored triangle debug primitive.
-    pub fn triangle(device: &wgpu::Device) -> Self {
+    pub fn triangle(device: &wgpu::Device, material_layout: &wgpu::BindGroupLayout) -> Self {
         let vertices = [
             Vertex {
                 position: [-1.4, -0.25, 0.0],
-                color: [1.0, 0.2, 0.2],
+                tint: [1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [-0.4, -0.25, 0.0],
-                color: [0.2, 1.0, 0.2],
+                tint: [0.85, 0.85, 0.85],
             },
             Vertex {
                 position: [-0.9, 0.75, 0.0],
-                color: [0.2, 0.2, 1.0],
+                tint: [0.7, 0.7, 0.7],
             },
         ];
         let indices: &[u16] = &[0, 1, 2];
 
-        Self::from_vertices(device, "Triangle", &vertices, indices)
+        Self::from_vertices(
+            device,
+            material_layout,
+            "Triangle",
+            [1.0, 0.25, 0.05, 1.0],
+            &vertices,
+            indices,
+        )
     }
 
     /// Creates a simple colored cube debug primitive.
-    pub fn cube(device: &wgpu::Device) -> Self {
+    pub fn cube(device: &wgpu::Device, material_layout: &wgpu::BindGroupLayout) -> Self {
         let vertices = [
             Vertex {
                 position: [0.25, -0.5, 0.5],
-                color: [1.0, 0.2, 0.2],
+                tint: [1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [1.25, -0.5, 0.5],
-                color: [0.2, 1.0, 0.2],
+                tint: [0.95, 0.95, 0.95],
             },
             Vertex {
                 position: [1.25, 0.5, 0.5],
-                color: [0.2, 0.2, 1.0],
+                tint: [0.85, 0.85, 0.85],
             },
             Vertex {
                 position: [0.25, 0.5, 0.5],
-                color: [1.0, 1.0, 0.2],
+                tint: [0.75, 0.75, 0.75],
             },
             Vertex {
                 position: [0.25, -0.5, -0.5],
-                color: [1.0, 0.2, 1.0],
+                tint: [0.65, 0.65, 0.65],
             },
             Vertex {
                 position: [1.25, -0.5, -0.5],
-                color: [0.2, 1.0, 1.0],
+                tint: [0.55, 0.55, 0.55],
             },
             Vertex {
                 position: [1.25, 0.5, -0.5],
-                color: [1.0, 0.6, 0.2],
+                tint: [0.45, 0.45, 0.45],
             },
             Vertex {
                 position: [0.25, 0.5, -0.5],
-                color: [0.8, 0.8, 0.9],
+                tint: [0.35, 0.35, 0.35],
             },
         ];
 
@@ -108,37 +118,53 @@ impl Mesh {
             7, 4, 5, 1, 4, 1, 0,
         ];
 
-        Self::from_vertices(device, "Cube", &vertices, indices)
+        Self::from_vertices(
+            device,
+            material_layout,
+            "Cube",
+            [0.05, 0.95, 0.35, 1.0],
+            &vertices,
+            indices,
+        )
     }
 
     /// Creates a flat colored plane debug primitive.
-    pub fn plane(device: &wgpu::Device) -> Self {
+    pub fn plane(device: &wgpu::Device, material_layout: &wgpu::BindGroupLayout) -> Self {
         let vertices = [
             Vertex {
                 position: [-1.5, -0.65, -1.0],
-                color: [0.45, 0.45, 0.5],
+                tint: [1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [1.5, -0.65, -1.0],
-                color: [0.55, 0.55, 0.6],
+                tint: [0.9, 0.9, 0.9],
             },
             Vertex {
                 position: [1.5, -0.65, 1.0],
-                color: [0.35, 0.35, 0.4],
+                tint: [0.75, 0.75, 0.75],
             },
             Vertex {
                 position: [-1.5, -0.65, 1.0],
-                color: [0.65, 0.65, 0.7],
+                tint: [0.85, 0.85, 0.85],
             },
         ];
         let indices: &[u16] = &[0, 2, 1, 0, 3, 2];
 
-        Self::from_vertices(device, "Plane", &vertices, indices)
+        Self::from_vertices(
+            device,
+            material_layout,
+            "Plane",
+            [0.25, 0.3, 1.0, 1.0],
+            &vertices,
+            indices,
+        )
     }
 
     fn from_vertices(
         device: &wgpu::Device,
+        material_layout: &wgpu::BindGroupLayout,
         label: &str,
+        base_color: [f32; 4],
         vertices: &[Vertex],
         indices: &[u16],
     ) -> Self {
@@ -157,6 +183,7 @@ impl Mesh {
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
+            material: Material::new(device, material_layout, label, base_color),
         }
     }
 
@@ -173,5 +200,10 @@ impl Mesh {
     /// Number of indices to draw.
     pub fn index_count(&self) -> u32 {
         self.index_count
+    }
+
+    /// Material used when drawing this mesh.
+    pub fn material(&self) -> &Material {
+        &self.material
     }
 }

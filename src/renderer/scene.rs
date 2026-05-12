@@ -20,7 +20,12 @@ pub struct Scene {
 
 impl Scene {
     /// Builds the initial scene contents for the current drawable size.
-    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        material_layout: &wgpu::BindGroupLayout,
+        width: u32,
+        height: u32,
+    ) -> Self {
         Self {
             clear_color: wgpu::Color {
                 r: 0.53,
@@ -30,9 +35,9 @@ impl Scene {
             },
             view_projection: view_projection(width, height),
             meshes: vec![
-                Mesh::plane(device),
-                Mesh::triangle(device),
-                Mesh::cube(device),
+                Mesh::plane(device, material_layout),
+                Mesh::triangle(device, material_layout),
+                Mesh::cube(device, material_layout),
             ],
         }
     }
