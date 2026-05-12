@@ -59,8 +59,8 @@ refined as adjacent systems mature.
 - [x] UV generation from JSON block models
 - [x] Cube/block model renderer for parented models (e.g. `block/cube_all`, `block/cube_column`)
 - [x] Basic block material/color mapping from model/block data
-- [ ] Depth-tested opaque chunk pass
-- [ ] Transparent block pass for water/glass/leaves
+- [x] Depth-tested opaque chunk pass
+- [x] Transparent block pass for water/glass/leaves
 - [ ] Ambient occlusion in chunk mesh vertex shading
 - [ ] Frustum culling for chunks outside view
 - [ ] Simple chunk render distance control

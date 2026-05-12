@@ -33,6 +33,33 @@ fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Qua
     *off += 4;
 }
 
+fn random_rotation(path: &str, x: usize, y: usize, z: usize, face: Face) -> u8 {
+    if !matches!(path, "block/sand" | "block/dirt" | "block/grass_block_top") {
+        return 0;
+    }
+
+    let mut h = x as u32;
+    h = h.wrapping_mul(0x9E37_79B9) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
+    h ^= (z as u32).wrapping_mul(0xC2B2_AE35);
+    h ^= face as u32;
+    ((h ^ (h >> 16)) & 3) as u8
+}
+
+fn face_uv(
+    model: Option<&BlockModel>,
+    atlas: &TextureAtlas,
+    face: Face,
+    x: usize,
+    y: usize,
+    z: usize,
+) -> ([f32; 4], u8) {
+    let Some(model) = model else {
+        return ([0.0; 4], 0);
+    };
+    let texture = model.texture(face);
+    (atlas.uv(texture), random_rotation(texture, x, y, z, face))
+}
+
 /// Output of the mesher.
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
@@ -88,38 +115,38 @@ pub fn mesh_chunk(
 
                 // Right (+X)
                 if x + 1 >= SX || face_visible(block, &blocks[idx + 1]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Right)));
-                    let q = quad(0, fx, fy, fz, uv, top_height);
+                    let (uv, rotation) = face_uv(model, atlas, Face::Right, x, y, z);
+                    let q = quad(0, fx, fy, fz, uv, top_height, rotation);
                     push_quad(verts, inds, off, q);
                 }
                 // Left (-X)
                 if x == 0 || face_visible(block, &blocks[idx - 1]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Left)));
-                    let q = quad(1, fx, fy, fz, uv, top_height);
+                    let (uv, rotation) = face_uv(model, atlas, Face::Left, x, y, z);
+                    let q = quad(1, fx, fy, fz, uv, top_height, rotation);
                     push_quad(verts, inds, off, q);
                 }
                 // Top (+Y)
                 if y + 1 >= SY || face_visible(block, &blocks[idx + SLICE]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Top)));
-                    let q = quad(2, fx, fy, fz, uv, top_height);
+                    let (uv, rotation) = face_uv(model, atlas, Face::Top, x, y, z);
+                    let q = quad(2, fx, fy, fz, uv, top_height, rotation);
                     push_quad(verts, inds, off, q);
                 }
                 // Bottom (-Y)
                 if y == 0 || face_visible(block, &blocks[idx - SLICE]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Bottom)));
-                    let q = quad(3, fx, fy, fz, uv, top_height);
+                    let (uv, rotation) = face_uv(model, atlas, Face::Bottom, x, y, z);
+                    let q = quad(3, fx, fy, fz, uv, top_height, rotation);
                     push_quad(verts, inds, off, q);
                 }
                 // Front (+Z)
                 if z + 1 >= SZ || face_visible(block, &blocks[idx + SX]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Front)));
-                    let q = quad(4, fx, fy, fz, uv, top_height);
+                    let (uv, rotation) = face_uv(model, atlas, Face::Front, x, y, z);
+                    let q = quad(4, fx, fy, fz, uv, top_height, rotation);
                     push_quad(verts, inds, off, q);
                 }
                 // Back (-Z)
                 if z == 0 || face_visible(block, &blocks[idx - SX]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Back)));
-                    let q = quad(5, fx, fy, fz, uv, top_height);
+                    let (uv, rotation) = face_uv(model, atlas, Face::Back, x, y, z);
+                    let q = quad(5, fx, fy, fz, uv, top_height, rotation);
                     push_quad(verts, inds, off, q);
                 }
             }
@@ -141,7 +168,7 @@ struct Quad {
     vertices: [Vertex; 4],
 }
 
-fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32) -> Quad {
+fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32, rotation: u8) -> Quad {
     let [u0, v0, u1, v1] = uv;
     let off = |v: [f32; 3]| [v[0] + ox - 8.0, v[1] + oy, v[2] + oz - 8.0];
     // Each face: (a,b,c,d) where triangles are a→b→c and a→c→d (CCW outside).
@@ -210,6 +237,8 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32) -> Qu
         _ => unreachable!(),
     };
 
+    let uvs = rotate_uvs(uvs, rotation);
+
     Quad {
         vertices: [
             Vertex {
@@ -230,4 +259,11 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32) -> Qu
             },
         ],
     }
+}
+
+fn rotate_uvs(mut uvs: [[f32; 2]; 4], rotation: u8) -> [[f32; 2]; 4] {
+    for _ in 0..rotation {
+        uvs = [uvs[3], uvs[0], uvs[1], uvs[2]];
+    }
+    uvs
 }
