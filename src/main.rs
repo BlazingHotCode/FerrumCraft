@@ -46,8 +46,9 @@ const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
 const FREE_FLY_SPEED: f32 = 6.0;
 const FREE_FLY_ACCELERATION: f32 = 18.0;
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
-const MAX_RENDER_DISTANCE_CHUNKS: i32 = 8;
-const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 2;
+const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
+const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
+const DEMO_WORLD_SEED: u64 = 12_345;
 
 /// Top-level application state owned by the winit event loop.
 ///
@@ -113,6 +114,7 @@ impl ApplicationHandler for App {
         self.window = Some(w);
         self.renderer = Some(renderer);
         self.camera = Some(camera);
+        self.debug_overlay.set_world_seed(self.world.seed());
         self.rebuild_chunk_meshes(true);
     }
 
@@ -400,7 +402,7 @@ fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
 }
 
 fn create_demo_world() -> world::World {
-    let mut world = world::World::new();
+    let mut world = world::World::with_seed(DEMO_WORLD_SEED);
     let origin = world::ChunkPos(0, 0);
     world.load_chunk(origin);
 
@@ -418,7 +420,8 @@ fn create_demo_world() -> world::World {
             world.set_block(world::BlockPos(x, 1, z), id("grass_block"));
         }
     }
-    for y in 2..8 {
+    let far_pillar_height = world.seeded_range(38, 8, 1, 5, 8);
+    for y in 2..far_pillar_height {
         world.set_block(world::BlockPos(38, y, 8), id("stone"));
     }
     for y in 2..5 {
@@ -439,6 +442,13 @@ fn create_demo_world() -> world::World {
     }
     world.set_block(world::BlockPos(13, 4, 2), id("stone"));
     world.set_block(world::BlockPos(12, 4, 3), id("stone"));
+    for x in 8..12 {
+        let z = world.seeded_range(x, 6, 2, 3, 7);
+        let height = world.seeded_range(x, z, 3, 2, 4);
+        for y in 2..=height {
+            world.set_block(world::BlockPos(x, y, z), id("stone"));
+        }
+    }
     for x in 10..14 {
         for z in 10..14 {
             world.set_block(world::BlockPos(x, 1, z), id("sand"));
@@ -604,6 +614,7 @@ fn main() {
 
     // Create a demo world and place some blocks.
     let mut world = create_demo_world();
+    log::info!(target: "world", "Demo world seed: {}", world.seed());
     if let Some(def) = block_registry
         .iter()
         .find(|(id, _)| id.path() == "oak_log")

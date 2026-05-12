@@ -126,6 +126,7 @@ impl Chunk {
 /// The game world: a collection of loaded chunks keyed by position.
 #[derive(Clone, Debug)]
 pub struct World {
+    seed: u64,
     chunks: HashMap<ChunkPos, Chunk>,
     dirty_chunks: Vec<ChunkPos>,
 }
@@ -133,10 +134,37 @@ pub struct World {
 impl World {
     /// Creates an empty world with no chunks loaded.
     pub fn new() -> Self {
+        Self::with_seed(0)
+    }
+
+    /// Creates an empty world with a deterministic generation seed.
+    pub fn with_seed(seed: u64) -> Self {
         Self {
+            seed,
             chunks: HashMap::new(),
             dirty_chunks: Vec::new(),
         }
+    }
+
+    /// Deterministic world generation seed.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Stable coordinate hash for deterministic world generation decisions.
+    pub fn seeded_u32(&self, x: i32, z: i32, salt: u64) -> u32 {
+        let mut h = self.seed ^ salt;
+        h ^= (x as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        h = h.rotate_left(27).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        h ^= (z as i64 as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+        h = h.rotate_left(31).wrapping_mul(0x94D0_49BB_1331_11EB);
+        (h ^ (h >> 32)) as u32
+    }
+
+    /// Stable integer range helper backed by [`Self::seeded_u32`].
+    pub fn seeded_range(&self, x: i32, z: i32, salt: u64, min: i32, max_inclusive: i32) -> i32 {
+        let span = (max_inclusive - min + 1).max(1) as u32;
+        min + (self.seeded_u32(x, z, salt) % span) as i32
     }
 
     /// Gets the block at an absolute world position.

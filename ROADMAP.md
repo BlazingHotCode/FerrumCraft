@@ -66,7 +66,7 @@ refined as adjacent systems mature.
 - [x] Simple chunk render distance control
 
 ## Phase 6 - Terrain Generation
-- [ ] Deterministic world seed
+- [x] Deterministic world seed
 - [ ] Worldgen feature registry with namespaced string IDs
 - [ ] Data-driven feature JSON for trees, ores, lakes, flowers, and structures
 - [ ] Heightmap/noise terrain generation

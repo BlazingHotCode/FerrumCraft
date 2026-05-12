@@ -21,6 +21,7 @@ pub struct DebugOverlay {
     visible_meshes: usize,
     culled_meshes: usize,
     render_distance_chunks: i32,
+    world_seed: u64,
 }
 
 impl DebugOverlay {
@@ -63,13 +64,19 @@ impl DebugOverlay {
         self.render_distance_chunks = chunks;
     }
 
+    /// Updates the deterministic world seed diagnostic shown by F3.
+    pub fn set_world_seed(&mut self, seed: u64) {
+        self.world_seed = seed;
+    }
+
     /// Text rendered by the overlay when visible.
     pub fn text(&self) -> Option<String> {
         self.visible.then(|| {
             format!(
-                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}\nRENDER DISTANCE: {} CHUNKS\nMESHES: {} VISIBLE, {} CULLED",
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nSEED: {}\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}\nRENDER DISTANCE: {} CHUNKS\nMESHES: {} VISIBLE, {} CULLED",
                 self.fps,
                 self.frame_ms,
+                self.world_seed,
                 self.player_position.x,
                 self.player_position.y,
                 self.player_position.z,
