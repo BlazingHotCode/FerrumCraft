@@ -3,7 +3,7 @@
 ## Phase 1 — Foundation
 - [x] Window with winit
 - [x] wgpu rendering pipeline (clear screen)
-- [ ] Renderer architecture cleanup (separate scene, mesh, and pipeline responsibilities)
+- [x] Renderer architecture cleanup (separate scene, mesh, and pipeline responsibilities)
 - [ ] Basic static 3D renderer (vertex/index buffers, depth testing, perspective projection)
 - [ ] Built-in debug shapes (triangle, cube, plane)
 - [ ] Event loop integration (resize, redraw, input plumbing)

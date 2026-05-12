@@ -58,7 +58,5 @@ fn main() {
         window: None,
         renderer: None,
     };
-    event_loop
-        .run_app(&mut app)
-        .expect("Event loop error");
+    event_loop.run_app(&mut app).expect("Event loop error");
 }
