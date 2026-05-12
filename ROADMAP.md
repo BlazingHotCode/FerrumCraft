@@ -9,7 +9,7 @@ expanded.
 - [x] wgpu rendering pipeline (clear screen)
 - [x] Renderer architecture cleanup (separate scene, mesh, and pipeline responsibilities)
 - [x] Basic static 3D renderer (vertex/index buffers, depth testing, perspective projection)
-- [ ] Built-in debug shapes (triangle, cube, plane)
+- [x] Built-in debug shapes (triangle, cube, plane)
 - [ ] Event loop integration (resize, redraw, input plumbing)
 - [ ] Basic shaders + material/color pipeline
 

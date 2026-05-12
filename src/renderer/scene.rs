@@ -8,7 +8,7 @@ use glam::{Mat4, Vec3};
 
 /// Renderable world state for the current frame.
 ///
-/// For now this stores a clear color, one static cube mesh, and a perspective
+/// For now this stores a clear color, built-in debug meshes, and a perspective
 /// camera. Lights, materials, and chunk meshes can be added here as the renderer
 /// grows.
 #[derive(Debug)]
@@ -29,7 +29,11 @@ impl Scene {
                 a: 1.0,
             },
             view_projection: view_projection(width, height),
-            meshes: vec![Mesh::cube(device)],
+            meshes: vec![
+                Mesh::plane(device),
+                Mesh::triangle(device),
+                Mesh::cube(device),
+            ],
         }
     }
 

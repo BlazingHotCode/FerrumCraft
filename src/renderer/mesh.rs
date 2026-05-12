@@ -45,39 +45,60 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    /// Creates a simple colored cube used to validate the static 3D render path.
-    pub fn cube(device: &wgpu::Device) -> Self {
+    /// Creates a flat colored triangle debug primitive.
+    pub fn triangle(device: &wgpu::Device) -> Self {
         let vertices = [
             Vertex {
-                position: [-0.5, -0.5, 0.5],
+                position: [-1.4, -0.25, 0.0],
                 color: [1.0, 0.2, 0.2],
             },
             Vertex {
-                position: [0.5, -0.5, 0.5],
+                position: [-0.4, -0.25, 0.0],
                 color: [0.2, 1.0, 0.2],
             },
             Vertex {
-                position: [0.5, 0.5, 0.5],
+                position: [-0.9, 0.75, 0.0],
+                color: [0.2, 0.2, 1.0],
+            },
+        ];
+        let indices: &[u16] = &[0, 1, 2];
+
+        Self::from_vertices(device, "Triangle", &vertices, indices)
+    }
+
+    /// Creates a simple colored cube debug primitive.
+    pub fn cube(device: &wgpu::Device) -> Self {
+        let vertices = [
+            Vertex {
+                position: [0.25, -0.5, 0.5],
+                color: [1.0, 0.2, 0.2],
+            },
+            Vertex {
+                position: [1.25, -0.5, 0.5],
+                color: [0.2, 1.0, 0.2],
+            },
+            Vertex {
+                position: [1.25, 0.5, 0.5],
                 color: [0.2, 0.2, 1.0],
             },
             Vertex {
-                position: [-0.5, 0.5, 0.5],
+                position: [0.25, 0.5, 0.5],
                 color: [1.0, 1.0, 0.2],
             },
             Vertex {
-                position: [-0.5, -0.5, -0.5],
+                position: [0.25, -0.5, -0.5],
                 color: [1.0, 0.2, 1.0],
             },
             Vertex {
-                position: [0.5, -0.5, -0.5],
+                position: [1.25, -0.5, -0.5],
                 color: [0.2, 1.0, 1.0],
             },
             Vertex {
-                position: [0.5, 0.5, -0.5],
+                position: [1.25, 0.5, -0.5],
                 color: [1.0, 0.6, 0.2],
             },
             Vertex {
-                position: [-0.5, 0.5, -0.5],
+                position: [0.25, 0.5, -0.5],
                 color: [0.8, 0.8, 0.9],
             },
         ];
@@ -87,13 +108,47 @@ impl Mesh {
             7, 4, 5, 1, 4, 1, 0,
         ];
 
+        Self::from_vertices(device, "Cube", &vertices, indices)
+    }
+
+    /// Creates a flat colored plane debug primitive.
+    pub fn plane(device: &wgpu::Device) -> Self {
+        let vertices = [
+            Vertex {
+                position: [-1.5, -0.65, -1.0],
+                color: [0.45, 0.45, 0.5],
+            },
+            Vertex {
+                position: [1.5, -0.65, -1.0],
+                color: [0.55, 0.55, 0.6],
+            },
+            Vertex {
+                position: [1.5, -0.65, 1.0],
+                color: [0.35, 0.35, 0.4],
+            },
+            Vertex {
+                position: [-1.5, -0.65, 1.0],
+                color: [0.65, 0.65, 0.7],
+            },
+        ];
+        let indices: &[u16] = &[0, 2, 1, 0, 3, 2];
+
+        Self::from_vertices(device, "Plane", &vertices, indices)
+    }
+
+    fn from_vertices(
+        device: &wgpu::Device,
+        label: &str,
+        vertices: &[Vertex],
+        indices: &[u16],
+    ) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cube vertex buffer"),
-            contents: bytemuck::cast_slice(&vertices),
+            label: Some(&format!("{label} vertex buffer")),
+            contents: bytemuck::cast_slice(vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cube index buffer"),
+            label: Some(&format!("{label} index buffer")),
             contents: bytemuck::cast_slice(indices),
             usage: wgpu::BufferUsages::INDEX,
         });
