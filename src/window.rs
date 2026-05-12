@@ -4,9 +4,11 @@ use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::window::Window as WinitWindow;
 
+use std::sync::Arc;
+
 pub struct Window {
     #[allow(dead_code)]
-    pub inner: WinitWindow,
+    pub inner: Arc<WinitWindow>,
 }
 
 impl Window {
@@ -16,7 +18,7 @@ impl Window {
             .with_title("FerrumCraft")
             .with_inner_size(size);
 
-        let inner = event_loop.create_window(attributes)?;
+        let inner = Arc::new(event_loop.create_window(attributes)?);
         Ok(Self { inner })
     }
 }
@@ -25,7 +27,9 @@ fn preferred_size(monitor: Option<&MonitorHandle>) -> PhysicalSize<u32> {
     const DEFAULT: PhysicalSize<u32> = PhysicalSize::new(1280, 720);
     const FRACTION: f32 = 0.8;
 
-    let Some(monitor) = monitor else { return DEFAULT };
+    let Some(monitor) = monitor else {
+        return DEFAULT;
+    };
     let PhysicalSize { width, height } = monitor.size();
     if width == 0 || height == 0 {
         return DEFAULT;
