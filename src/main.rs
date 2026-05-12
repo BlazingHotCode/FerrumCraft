@@ -4,6 +4,7 @@
 //! and renderer frame loop. Game state should move into dedicated modules as it
 //! grows; this file should stay focused on top-level orchestration.
 
+mod camera;
 mod debug;
 mod input;
 mod renderer;
@@ -11,6 +12,7 @@ mod window;
 
 use std::time::{Duration, Instant};
 
+use camera::FirstPersonCamera;
 use debug::DebugOverlay;
 use input::InputState;
 use winit::application::ApplicationHandler;
@@ -30,6 +32,7 @@ const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
 struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
+    camera: Option<FirstPersonCamera>,
     input: InputState,
     debug_overlay: DebugOverlay,
     last_update: Instant,
@@ -43,9 +46,15 @@ impl ApplicationHandler for App {
         }
 
         let w = window::Window::new(event_loop).expect("Failed to create window");
-        let renderer = pollster::block_on(renderer::Renderer::new(w.inner.clone()));
+        let size = w.inner.inner_size();
+        let camera = FirstPersonCamera::new(size.width, size.height);
+        let renderer = pollster::block_on(renderer::Renderer::new(
+            w.inner.clone(),
+            camera.view_projection(),
+        ));
         self.window = Some(w);
         self.renderer = Some(renderer);
+        self.camera = Some(camera);
     }
 
     fn window_event(
@@ -69,8 +78,14 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
+                if let Some(camera) = &mut self.camera {
+                    camera.resize(size.width, size.height);
+                }
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
+                    if let Some(camera) = &self.camera {
+                        renderer.set_view_projection(camera.view_projection());
+                    }
                 }
                 window.request_redraw();
             }
@@ -128,6 +143,10 @@ impl App {
     fn fixed_update(&mut self, _dt: Duration) {
         // Match Minecraft's 20 ticks-per-second simulation rate while rendering
         // stays independent and can run at a higher frame rate.
+        if let (Some(camera), Some(renderer)) = (&self.camera, &mut self.renderer) {
+            renderer.set_view_projection(camera.view_projection());
+            self.debug_overlay.set_player_position(camera.position());
+        }
     }
 }
 
@@ -137,6 +156,7 @@ fn main() {
     let mut app = App {
         window: None,
         renderer: None,
+        camera: None,
         input: InputState::default(),
         debug_overlay: DebugOverlay::default(),
         last_update: Instant::now(),

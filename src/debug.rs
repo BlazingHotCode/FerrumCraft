@@ -6,6 +6,8 @@
 
 use std::time::Duration;
 
+use glam::Vec3;
+
 /// User-toggleable debug data shown by the overlay.
 #[derive(Debug, Default)]
 pub struct DebugOverlay {
@@ -14,6 +16,7 @@ pub struct DebugOverlay {
     fps_elapsed: Duration,
     fps: u32,
     frame_ms: f32,
+    player_position: Vec3,
 }
 
 impl DebugOverlay {
@@ -35,13 +38,28 @@ impl DebugOverlay {
         }
     }
 
+    /// Updates player/camera diagnostics shown by F3.
+    pub fn set_player_position(&mut self, position: Vec3) {
+        self.player_position = position;
+    }
+
     /// Text rendered by the overlay when visible.
     pub fn text(&self) -> Option<String> {
         self.visible.then(|| {
             format!(
-                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPLAYER: N/A\nCHUNK: N/A",
-                self.fps, self.frame_ms
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPLAYER: {:.2} {:.2} {:.2}\nCHUNK: {} {}",
+                self.fps,
+                self.frame_ms,
+                self.player_position.x,
+                self.player_position.y,
+                self.player_position.z,
+                chunk_coord(self.player_position.x),
+                chunk_coord(self.player_position.z),
             )
         })
     }
+}
+
+fn chunk_coord(block_coord: f32) -> i32 {
+    (block_coord.floor() as i32).div_euclid(16)
 }

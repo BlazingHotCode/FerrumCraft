@@ -19,7 +19,7 @@ refined as adjacent systems mature.
 - [x] Debug overlay (FPS, frame time, player/chunk position)
 
 ## Phase 2 - First-Person Player
-- [ ] First-person camera with view/projection matrices
+- [x] First-person camera with view/projection matrices
 - [ ] Mouse look with pointer lock
 - [ ] WASD movement, jump, crouch, and sprint
 - [ ] Player collision capsule/AABB against blocks

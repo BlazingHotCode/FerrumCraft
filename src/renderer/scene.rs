@@ -4,7 +4,7 @@
 //! it or how the swapchain frame is acquired.
 
 use super::mesh::Mesh;
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 
 /// Renderable world state for the current frame.
 ///
@@ -19,12 +19,11 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// Builds the initial scene contents for the current drawable size.
+    /// Builds the initial scene contents for the current camera matrix.
     pub fn new(
         device: &wgpu::Device,
         material_layout: &wgpu::BindGroupLayout,
-        width: u32,
-        height: u32,
+        view_projection: Mat4,
     ) -> Self {
         Self {
             clear_color: wgpu::Color {
@@ -33,7 +32,7 @@ impl Scene {
                 b: 0.92,
                 a: 1.0,
             },
-            view_projection: view_projection(width, height),
+            view_projection,
             meshes: vec![
                 Mesh::plane(device, material_layout),
                 Mesh::triangle(device, material_layout),
@@ -42,9 +41,9 @@ impl Scene {
         }
     }
 
-    /// Updates aspect-ratio-sensitive camera projection after a surface resize.
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.view_projection = view_projection(width, height);
+    /// Updates the camera matrix used for rendering.
+    pub fn set_view_projection(&mut self, view_projection: Mat4) {
+        self.view_projection = view_projection;
     }
 
     /// Background color used when beginning the color pass.
@@ -61,11 +60,4 @@ impl Scene {
     pub fn meshes(&self) -> &[Mesh] {
         &self.meshes
     }
-}
-
-fn view_projection(width: u32, height: u32) -> Mat4 {
-    let aspect = width.max(1) as f32 / height.max(1) as f32;
-    let projection = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
-    let view = Mat4::look_at_rh(Vec3::new(2.0, 1.5, 3.0), Vec3::ZERO, Vec3::Y);
-    projection * view
 }

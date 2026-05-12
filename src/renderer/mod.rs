@@ -12,6 +12,7 @@ mod scene;
 
 use std::sync::Arc;
 
+use glam::Mat4;
 use overlay::OverlayRenderer;
 use pipeline::{RenderPipelines, depth_format};
 use scene::Scene;
@@ -37,7 +38,7 @@ pub struct Renderer {
 
 impl Renderer {
     /// Creates the surface, selects an adapter, and initializes renderer state.
-    pub async fn new(window: Arc<Window>) -> Self {
+    pub async fn new(window: Arc<Window>, view_projection: Mat4) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let size = window.inner_size();
         let surface = instance
@@ -66,12 +67,7 @@ impl Renderer {
         let pipelines = RenderPipelines::new(&device, config.format);
         let overlay = OverlayRenderer::new(&device, config.format);
         let depth_view = create_depth_view(&device, config.width, config.height);
-        let scene = Scene::new(
-            &device,
-            pipelines.material_layout(),
-            config.width,
-            config.height,
-        );
+        let scene = Scene::new(&device, pipelines.material_layout(), view_projection);
 
         Self {
             device,
@@ -94,7 +90,11 @@ impl Renderer {
         self.config.height = height.max(1);
         self.surface.configure(&self.device, &self.config);
         self.depth_view = create_depth_view(&self.device, self.config.width, self.config.height);
-        self.scene.resize(self.config.width, self.config.height);
+    }
+
+    /// Updates the camera matrix used by the scene shader uniforms.
+    pub fn set_view_projection(&mut self, view_projection: Mat4) {
+        self.scene.set_view_projection(view_projection);
     }
 
     /// Encodes and presents one frame.
