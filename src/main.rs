@@ -54,6 +54,7 @@ struct App {
     window: Option<window::Window>,
     renderer: Option<renderer::Renderer>,
     camera: Option<FirstPersonCamera>,
+    world: world::World,
     font: Option<Font>,
     block_models: Option<crate::registry::Registry<model::BlockModel>>,
     input: InputState,
@@ -110,7 +111,7 @@ impl ApplicationHandler for App {
 
         // Build chunk meshes and replace debug shapes.
         if let Some(ref mut renderer) = self.renderer {
-            build_chunk_meshes(renderer, &block_models);
+            build_chunk_meshes(renderer, &block_models, &self.world);
         }
     }
 
@@ -171,7 +172,11 @@ impl ApplicationHandler for App {
                 if let Some(renderer) = &mut self.renderer {
                     let frame_start = Instant::now();
                     let debug_text = self.debug_overlay.text();
-                    match renderer.render(debug_text.as_deref()) {
+                    let screen_tint = self
+                        .camera
+                        .as_ref()
+                        .and_then(|camera| camera_water_tint(&self.world, camera.position()));
+                    match renderer.render(debug_text.as_deref(), screen_tint) {
                         Ok(()) => {
                             self.debug_overlay.record_frame(frame_start.elapsed());
                             self.input.end_frame();
@@ -291,6 +296,7 @@ impl App {
 fn build_chunk_meshes(
     renderer: &mut renderer::Renderer,
     block_models: &crate::registry::Registry<model::BlockModel>,
+    world: &world::World,
 ) {
     // Build a path → model lookup map.
     use std::collections::HashMap;
@@ -299,22 +305,45 @@ fn build_chunk_meshes(
         .map(|(id, m)| (id.path().to_string(), m.clone()))
         .collect();
 
-    // Create a demo world.
+    // Mesh each chunk and build GPU meshes.
+    let material_layout = renderer.material_layout();
+    let device = &renderer.device;
+    let mut meshes = Vec::new();
+
+    for chunk in world.chunks() {
+        let data = mesher::mesh_chunk(chunk, &model_map, &renderer.atlas);
+        if data.vertices.is_empty() {
+            continue;
+        }
+
+        let mesh = renderer::Mesh::from_vertices(
+            device,
+            material_layout,
+            &format!("chunk_{}", chunk.pos().0),
+            [0.8, 0.85, 0.75, 1.0],
+            &data.vertices,
+            &data.indices,
+        );
+        meshes.push(mesh);
+    }
+
+    log::info!(target: "mesher", "Built {} chunk meshes from demo world", meshes.len());
+    renderer.set_chunk_meshes(meshes);
+}
+
+fn create_demo_world() -> world::World {
     let mut world = world::World::new();
     let origin = world::ChunkPos(0, 0);
     world.load_chunk(origin);
 
-    // Helper for creating string-based block IDs.
     let id = |s: &str| block::BlockId(s.to_string());
 
-    // Flat grass layer at y=0.
     for x in 0..world::CHUNK_SIZE_X {
         for z in 0..world::CHUNK_SIZE_Z {
             world.set_block(world::BlockPos(x as i32, 0, z as i32), id("dirt"));
             world.set_block(world::BlockPos(x as i32, 1, z as i32), id("grass_block"));
         }
     }
-    // A few features: stone pillar, material patches, log, leaves.
     for y in 2..5 {
         world.set_block(world::BlockPos(2, y, 2), id("stone"));
     }
@@ -346,30 +375,29 @@ fn build_chunk_meshes(
     world.set_block(world::BlockPos(5, 3, 6), id("oak_leaves"));
     world.set_block(world::BlockPos(5, 4, 5), id("oak_leaves"));
 
-    // Mesh each chunk and build GPU meshes.
-    let material_layout = renderer.material_layout();
-    let device = &renderer.device;
-    let mut meshes = Vec::new();
+    world
+}
 
-    for chunk in world.chunks() {
-        let data = mesher::mesh_chunk(chunk, &model_map, &renderer.atlas);
-        if data.vertices.is_empty() {
-            continue;
-        }
-
-        let mesh = renderer::Mesh::from_vertices(
-            device,
-            material_layout,
-            &format!("chunk_{}", chunk.pos().0),
-            [0.8, 0.85, 0.75, 1.0],
-            &data.vertices,
-            &data.indices,
-        );
-        meshes.push(mesh);
+fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
+    let block_pos = world::BlockPos(
+        (position.x + 8.0).floor() as i32,
+        position.y.floor() as i32,
+        (position.z + 8.0).floor() as i32,
+    );
+    if world.get_block(block_pos).0 != "water" {
+        return None;
     }
 
-    log::info!(target: "mesher", "Built {} chunk meshes from demo world", meshes.len());
-    renderer.set_chunk_meshes(meshes);
+    let local_y = position.y - position.y.floor();
+    let has_water_above = world
+        .get_block(world::BlockPos(block_pos.0, block_pos.1 + 1, block_pos.2))
+        .0
+        == "water";
+    if has_water_above || local_y < 14.0 / 16.0 {
+        Some([0.0196, 0.0196, 0.2, 0.65])
+    } else {
+        None
+    }
 }
 
 fn free_fly_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
@@ -483,29 +511,15 @@ fn main() {
     };
 
     // Create a demo world and place some blocks.
-    let mut world = world::World::new();
-    world.load_chunk(world::ChunkPos(0, 0));
-    world.set_block(
-        world::BlockPos(0, 0, 0),
-        block::BlockId("stone".to_string()),
-    );
-    world.set_block(
-        world::BlockPos(1, 0, 0),
-        block::BlockId("grass_block".to_string()),
-    );
-    world.set_block(world::BlockPos(2, 0, 0), block::BlockId("dirt".to_string()));
-    world.set_block(
-        world::BlockPos(3, 0, 0),
-        block::BlockId("oak_log".to_string()),
-    );
+    let mut world = create_demo_world();
     if let Some(def) = block_registry
         .iter()
         .find(|(id, _)| id.path() == "oak_log")
         .map(|(_, d)| d)
     {
-        world.set_block_property(world::BlockPos(3, 0, 0), 0, 1);
+        world.set_block_property(world::BlockPos(5, 2, 5), 0, 1);
         log::info!(target: "world", "Log axis = {}, properties: {:?}",
-            def.properties[0].values[world.get_block_property(world::BlockPos(3, 0, 0), 0) as usize],
+            def.properties[0].values[world.get_block_property(world::BlockPos(5, 2, 5), 0) as usize],
             def.properties);
     }
     log::info!(target: "world", "Directions: north={}, south={}, west={}, east={}, up={}, down={}",
@@ -528,6 +542,7 @@ fn main() {
         window: None,
         renderer: None,
         camera: None,
+        world,
         font: Some(font),
         block_models: Some(block_models),
         input: InputState::default(),

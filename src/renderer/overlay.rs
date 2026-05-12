@@ -205,6 +205,67 @@ impl OverlayRenderer {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.draw(0..vertices.len() as u32, 0..1);
     }
+
+    /// Draws a full-screen translucent color over the current frame.
+    pub fn encode_tint(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        color: [f32; 4],
+    ) {
+        let vertices = [
+            OverlayVertex {
+                position: [-1.0, -1.0],
+                color,
+            },
+            OverlayVertex {
+                position: [1.0, -1.0],
+                color,
+            },
+            OverlayVertex {
+                position: [1.0, 1.0],
+                color,
+            },
+            OverlayVertex {
+                position: [-1.0, -1.0],
+                color,
+            },
+            OverlayVertex {
+                position: [1.0, 1.0],
+                color,
+            },
+            OverlayVertex {
+                position: [-1.0, 1.0],
+                color,
+            },
+        ];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Screen tint vertex buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Screen tint pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
 }
 
 fn text_vertices(font: &Font, text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {

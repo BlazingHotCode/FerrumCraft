@@ -131,7 +131,11 @@ impl Renderer {
     }
 
     /// Encodes and presents one frame.
-    pub fn render(&mut self, debug_text: Option<&str>) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(
+        &mut self,
+        debug_text: Option<&str>,
+        screen_tint: Option<[f32; 4]>,
+    ) -> Result<(), wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
 
         let frame = self.surface.get_current_texture()?;
@@ -150,6 +154,11 @@ impl Renderer {
             &self.depth_view,
             &self.scene,
         );
+
+        if let Some(color) = screen_tint {
+            self.overlay
+                .encode_tint(&self.device, &mut encoder, &view, color);
+        }
 
         if let Some(text) = debug_text {
             self.overlay.encode(
