@@ -161,6 +161,8 @@ pub fn mesh_chunk(
     atlas: &TextureAtlas,
 ) -> MeshData {
     let blocks = chunk.blocks();
+    let chunk_origin_x = chunk.pos().0 as f32 * SX as f32;
+    let chunk_origin_z = chunk.pos().1 as f32 * SZ as f32;
     let mut opaque_verts = Vec::new();
     let mut opaque_inds = Vec::new();
     let mut opaque_off: u16 = 0;
@@ -190,9 +192,9 @@ pub fn mesh_chunk(
                     (&mut opaque_verts, &mut opaque_inds, &mut opaque_off)
                 };
 
-                let fx = x as f32;
+                let fx = chunk_origin_x + x as f32;
                 let fy = y as f32;
-                let fz = z as f32;
+                let fz = chunk_origin_z + z as f32;
                 let top_height =
                     if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
                         LOWERED_WATER_HEIGHT

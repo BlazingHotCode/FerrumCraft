@@ -18,6 +18,8 @@ pub struct DebugOverlay {
     frame_ms: f32,
     player_position: Vec3,
     facing: String,
+    visible_meshes: usize,
+    culled_meshes: usize,
 }
 
 impl DebugOverlay {
@@ -49,11 +51,17 @@ impl DebugOverlay {
         self.facing = facing;
     }
 
+    /// Updates renderer culling diagnostics shown by F3.
+    pub fn set_render_stats(&mut self, visible_meshes: usize, culled_meshes: usize) {
+        self.visible_meshes = visible_meshes;
+        self.culled_meshes = culled_meshes;
+    }
+
     /// Text rendered by the overlay when visible.
     pub fn text(&self) -> Option<String> {
         self.visible.then(|| {
             format!(
-                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}",
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}\nMESHES: {} VISIBLE, {} CULLED",
                 self.fps,
                 self.frame_ms,
                 self.player_position.x,
@@ -62,6 +70,8 @@ impl DebugOverlay {
                 chunk_coord(self.player_position.x),
                 chunk_coord(self.player_position.z),
                 self.facing,
+                self.visible_meshes,
+                self.culled_meshes,
             )
         })
     }

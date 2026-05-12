@@ -5,7 +5,7 @@
 
 use wgpu::util::DeviceExt;
 
-use super::mesh::Vertex;
+use super::mesh::{Frustum, Vertex};
 use super::scene::Scene;
 use super::texture::TextureAtlas;
 
@@ -29,6 +29,12 @@ pub struct RenderPipelines {
     material_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group: Option<wgpu::BindGroup>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderStats {
+    pub visible_meshes: usize,
+    pub culled_meshes: usize,
 }
 
 impl RenderPipelines {
@@ -162,7 +168,9 @@ impl RenderPipelines {
         view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
         scene: &Scene,
-    ) {
+    ) -> RenderStats {
+        let mut stats = RenderStats::default();
+
         queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -201,13 +209,22 @@ impl RenderPipelines {
                 pass.set_bind_group(2, tex_bg, &[]);
             }
 
+            let frustum = Frustum::from_view_projection(scene.view_projection());
             for mesh in scene.meshes() {
+                if !mesh.bounds().intersects_frustum(&frustum) {
+                    stats.culled_meshes += 1;
+                    continue;
+                }
+
+                stats.visible_meshes += 1;
                 pass.set_bind_group(1, mesh.material().bind_group(), &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
                 pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
             }
         }
+
+        stats
     }
 }
 

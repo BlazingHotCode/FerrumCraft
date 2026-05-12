@@ -6,6 +6,7 @@
 
 pub use mesh::{Mesh, Vertex};
 pub use overlay::Font;
+pub use pipeline::RenderStats;
 pub use texture::TextureAtlas;
 
 mod material;
@@ -135,7 +136,7 @@ impl Renderer {
         &mut self,
         debug_text: Option<&str>,
         screen_tint: Option<[f32; 4]>,
-    ) -> Result<(), wgpu::SurfaceError> {
+    ) -> Result<RenderStats, wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
 
         let frame = self.surface.get_current_texture()?;
@@ -147,7 +148,7 @@ impl Renderer {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
-        self.pipelines.encode(
+        let stats = self.pipelines.encode(
             &self.queue,
             &mut encoder,
             &view,
@@ -173,7 +174,7 @@ impl Renderer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        Ok(())
+        Ok(stats)
     }
 }
 

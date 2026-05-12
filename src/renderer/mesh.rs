@@ -7,6 +7,7 @@
 use wgpu::util::DeviceExt;
 
 use super::material::Material;
+use glam::{Mat4, Vec3, Vec4};
 
 /// One vertex in static mesh geometry.
 #[repr(C)]
@@ -50,6 +51,86 @@ pub struct Mesh {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     material: Material,
+    bounds: Bounds,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Bounds {
+    min: Vec3,
+    max: Vec3,
+}
+
+impl Bounds {
+    fn from_vertices(vertices: &[Vertex]) -> Self {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        for vertex in vertices {
+            let position = Vec3::from(vertex.position);
+            min = min.min(position);
+            max = max.max(position);
+        }
+
+        Self { min, max }
+    }
+
+    pub fn intersects_frustum(&self, frustum: &Frustum) -> bool {
+        frustum.contains_bounds(*self)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Frustum {
+    planes: [Vec4; 6],
+}
+
+impl Frustum {
+    pub fn from_view_projection(view_projection: Mat4) -> Self {
+        let m = view_projection;
+        let row = |i: usize| Vec4::new(m.x_axis[i], m.y_axis[i], m.z_axis[i], m.w_axis[i]);
+        let planes = [
+            normalize_plane(row(3) + row(0)),
+            normalize_plane(row(3) - row(0)),
+            normalize_plane(row(3) + row(1)),
+            normalize_plane(row(3) - row(1)),
+            normalize_plane(row(3) + row(2)),
+            normalize_plane(row(3) - row(2)),
+        ];
+
+        Self { planes }
+    }
+
+    fn contains_bounds(&self, bounds: Bounds) -> bool {
+        for plane in self.planes {
+            let positive = Vec3::new(
+                if plane.x >= 0.0 {
+                    bounds.max.x
+                } else {
+                    bounds.min.x
+                },
+                if plane.y >= 0.0 {
+                    bounds.max.y
+                } else {
+                    bounds.min.y
+                },
+                if plane.z >= 0.0 {
+                    bounds.max.z
+                } else {
+                    bounds.min.z
+                },
+            );
+
+            if plane.truncate().dot(positive) + plane.w < 0.0 {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+fn normalize_plane(plane: Vec4) -> Vec4 {
+    let len = plane.truncate().length();
+    if len > 0.0 { plane / len } else { plane }
 }
 
 impl Mesh {
@@ -72,11 +153,14 @@ impl Mesh {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        let bounds = Bounds::from_vertices(vertices);
+
         Self {
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
             material: Material::new(device, material_layout, label, base_color),
+            bounds,
         }
     }
 
@@ -98,5 +182,10 @@ impl Mesh {
     /// Material used when drawing this mesh.
     pub fn material(&self) -> &Material {
         &self.material
+    }
+
+    /// World-space bounds used for frustum culling.
+    pub fn bounds(&self) -> Bounds {
+        self.bounds
     }
 }

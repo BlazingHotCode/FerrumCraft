@@ -177,7 +177,9 @@ impl ApplicationHandler for App {
                         .as_ref()
                         .and_then(|camera| camera_water_tint(&self.world, camera.position()));
                     match renderer.render(debug_text.as_deref(), screen_tint) {
-                        Ok(()) => {
+                        Ok(stats) => {
+                            self.debug_overlay
+                                .set_render_stats(stats.visible_meshes, stats.culled_meshes);
                             self.debug_overlay.record_frame(frame_start.elapsed());
                             self.input.end_frame();
                         }
@@ -343,6 +345,15 @@ fn create_demo_world() -> world::World {
             world.set_block(world::BlockPos(x as i32, 0, z as i32), id("dirt"));
             world.set_block(world::BlockPos(x as i32, 1, z as i32), id("grass_block"));
         }
+    }
+    for x in 32..48 {
+        for z in 0..16 {
+            world.set_block(world::BlockPos(x, 0, z), id("dirt"));
+            world.set_block(world::BlockPos(x, 1, z), id("grass_block"));
+        }
+    }
+    for y in 2..8 {
+        world.set_block(world::BlockPos(38, y, 8), id("stone"));
     }
     for y in 2..5 {
         world.set_block(world::BlockPos(2, y, 2), id("stone"));
