@@ -31,7 +31,7 @@ refined as adjacent systems mature.
 - [x] Registry bootstrap order for blocks, items, entities, biomes, features, sounds, particles, screens, commands, and dimensions
 - [x] Language files for display names (`assets/<namespace>/lang/en_us.json`)
 - [x] Block model JSON files (`assets/<namespace>/models/block/*.json`)
-- [ ] Item model JSON files (`assets/<namespace>/models/item/*.json`)
+- [x] Item model JSON files (`assets/<namespace>/models/item/*.json`)
 - [ ] Blockstate JSON files for mapping block properties to models
 - [ ] Texture references in models (`assets/<namespace>/textures/...`)
 - [ ] Tags for grouping blocks/items (`data/<namespace>/tags/...`)

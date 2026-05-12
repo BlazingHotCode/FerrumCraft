@@ -82,6 +82,68 @@ pub fn load_block_models(
     reg
 }
 
+/// An item model that maps to a block model reference or a flat texture.
+///
+/// For placeable blocks the item model references the block model (e.g.
+/// `{"parent": "block/stone"}`). For non-block items it will reference a
+/// built-in parent like `builtin/generated` with a layer texture.
+#[derive(Clone, Debug)]
+pub struct ItemModel {
+    /// The block path that this item renders as, if it's a placeable block.
+    pub parent_block: Option<String>,
+}
+
+/// Loads item models for the given item paths.
+///
+/// Each item model file is loaded from `models/item/<path>.json`.
+pub fn load_item_models(
+    resources: &ResourceManager,
+    namespace: &str,
+    item_paths: &[String],
+) -> Registry<ItemModel> {
+    let mut reg = Registry::new();
+
+    for path in item_paths {
+        let filename = format!("{path}.json");
+        let id = match NamespacedId::ferrumcraft(path) {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+
+        match load_single_item_model(resources, namespace, &filename) {
+            Ok(model) => reg.register(id, model),
+            Err(e) => {
+                log::warn!(target: "models", "Failed to load item model {path}: {e}");
+            }
+        }
+    }
+
+    reg
+}
+
+fn load_single_item_model(
+    resources: &ResourceManager,
+    namespace: &str,
+    filename: &str,
+) -> Result<ItemModel, ModelError> {
+    let file: ModelFile = resources
+        .read_json(namespace, ResourceCategory::ItemModel, filename)
+        .map_err(|e| ModelError::Load {
+            file: filename.to_string(),
+            detail: e.to_string(),
+        })?;
+
+    let parent_block = file.parent.as_ref().and_then(|p| {
+        if let Some(block_name) = p.strip_prefix("block/") {
+            Some(block_name.to_string())
+        } else {
+            None
+        }
+    });
+
+    Ok(ItemModel { parent_block })
+}
+
 fn load_single_model(
     resources: &ResourceManager,
     namespace: &str,

@@ -303,6 +303,11 @@ fn main() {
     let block_models = model::load_block_models(&_resources, "ferrumcraft", &block_ids);
     log::info!(target: "models", "Loaded {} block models", block_models.len());
 
+    // Load item models for each block (placeable items).
+    let item_paths: Vec<String> = block_ids.iter().map(|id| id.path().to_string()).collect();
+    let item_models = model::load_item_models(&_resources, "ferrumcraft", &item_paths);
+    log::info!(target: "models", "Loaded {} item models", item_models.len());
+
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
