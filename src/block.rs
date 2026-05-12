@@ -7,6 +7,14 @@
 use crate::id::NamespacedId;
 use crate::registry::Registry;
 
+/// Compact runtime identifier for a block type (0 = air).
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct BlockId(pub u16);
+
+impl BlockId {
+    pub const AIR: BlockId = BlockId(0);
+}
+
 /// A block type with its gameplay properties.
 #[derive(Debug, Clone)]
 pub struct BlockDefinition {

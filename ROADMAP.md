@@ -47,10 +47,10 @@ refined as adjacent systems mature.
 - [ ] Data-driven block components (collision, flammable, gravity affected, inventory, smelting, etc.)
 - [ ] Blockstate property schemas defining allowed values (axis, facing, waterlogged, growth, etc.)
 - [ ] Blockstate storage for property variants (axis, facing, waterlogged, growth, etc.)
-- [ ] Chunk storage (16x64x16 initially, expandable later)
-- [ ] World struct managing loaded chunks by chunk coordinate
-- [ ] Safe block get/set APIs across chunk boundaries
-- [ ] Dirty chunk tracking for remeshing and saving
+- [x] Chunk storage (16x64x16 initially, expandable later)
+- [x] World struct managing loaded chunks by chunk coordinate
+- [x] Safe block get/set APIs across chunk boundaries
+- [x] Dirty chunk tracking for remeshing and saving
 
 ## Phase 5 - Chunk Rendering
 - [ ] Naive block meshing (visible faces only)

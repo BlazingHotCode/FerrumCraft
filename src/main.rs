@@ -21,6 +21,7 @@ mod renderer;
 mod resource;
 mod tag;
 mod window;
+mod world;
 
 use std::time::{Duration, Instant};
 
@@ -326,6 +327,18 @@ fn main() {
 
     // Data validation.
     validate_data(&block_registry, &block_models, &blockstates, &_resources);
+
+    // Create a demo world and place some blocks.
+    let mut world = world::World::new();
+    world.load_chunk(world::ChunkPos(0, 0));
+    world.set_block(world::BlockPos(0, 0, 0), block::BlockId(1));
+    world.set_block(world::BlockPos(1, 0, 0), block::BlockId(2));
+    world.set_block(world::BlockPos(2, 0, 0), block::BlockId(3));
+    log::info!(target: "world", "Demo world created: {} chunks, {} dirty, block at (0,0,0) = {:?}",
+        world.chunk_count(),
+        world.drain_dirty().len(),
+        world.get_block(world::BlockPos(0, 0, 0)),
+    );
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
