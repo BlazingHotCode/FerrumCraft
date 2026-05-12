@@ -23,12 +23,15 @@
 use crate::id::NamespacedId;
 use crate::registry::Registry;
 
-/// Compact runtime identifier for a block type (0 = air).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub struct BlockId(pub u16);
+/// Runtime identifier for a block type stored as its string path.
+///
+/// Internally this is the path portion of a NamespacedId (e.g. `"stone"`).
+/// Use the block registry to look up a BlockId by name: `registry.id("stone")`.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub struct BlockId(pub String);
 
 impl BlockId {
-    pub const AIR: BlockId = BlockId(0);
+    pub const AIR: BlockId = BlockId(String::new());
 }
 
 /// A single property schema defining allowed values for a block variant.

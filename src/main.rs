@@ -292,12 +292,11 @@ fn build_chunk_meshes(
     renderer: &mut renderer::Renderer,
     block_models: &crate::registry::Registry<model::BlockModel>,
 ) {
-    // Build a BlockId → model lookup map. BlockId(1) = first model.
+    // Build a path → model lookup map.
     use std::collections::HashMap;
-    let model_map: HashMap<u16, model::BlockModel> = block_models
+    let model_map: HashMap<String, model::BlockModel> = block_models
         .iter()
-        .enumerate()
-        .map(|(i, (_, m))| ((i + 1) as u16, m.clone()))
+        .map(|(id, m)| (id.path().to_string(), m.clone()))
         .collect();
 
     // Create a demo world.
@@ -305,29 +304,32 @@ fn build_chunk_meshes(
     let origin = world::ChunkPos(0, 0);
     world.load_chunk(origin);
 
+    // Helper for creating string-based block IDs.
+    let id = |s: &str| block::BlockId(s.to_string());
+
     // Flat grass layer at y=0.
     for x in 0..world::CHUNK_SIZE_X {
         for z in 0..world::CHUNK_SIZE_Z {
-            world.set_block(world::BlockPos(x as i32, 0, z as i32), block::BlockId(3)); // dirt
-            world.set_block(world::BlockPos(x as i32, 1, z as i32), block::BlockId(2)); // grass
+            world.set_block(world::BlockPos(x as i32, 0, z as i32), id("dirt"));
+            world.set_block(world::BlockPos(x as i32, 1, z as i32), id("grass_block"));
         }
     }
-    // A few features: stone pillar, sand patch, log.
+    // A few features: stone pillar, sand patch, log, leaves.
     for y in 2..5 {
-        world.set_block(world::BlockPos(2, y, 2), block::BlockId(1)); // stone pillar
+        world.set_block(world::BlockPos(2, y, 2), id("stone"));
     }
     for x in 10..14 {
         for z in 10..14 {
-            world.set_block(world::BlockPos(x, 1, z), block::BlockId(4)); // sand
+            world.set_block(world::BlockPos(x, 1, z), id("sand"));
         }
     }
-    world.set_block(world::BlockPos(5, 2, 5), block::BlockId(6)); // log
-    world.set_block(world::BlockPos(5, 3, 5), block::BlockId(6)); // log
-    world.set_block(world::BlockPos(4, 3, 5), block::BlockId(7)); // leaves
-    world.set_block(world::BlockPos(6, 3, 5), block::BlockId(7));
-    world.set_block(world::BlockPos(5, 3, 4), block::BlockId(7));
-    world.set_block(world::BlockPos(5, 3, 6), block::BlockId(7));
-    world.set_block(world::BlockPos(5, 4, 5), block::BlockId(7));
+    world.set_block(world::BlockPos(5, 2, 5), id("oak_log"));
+    world.set_block(world::BlockPos(5, 3, 5), id("oak_log"));
+    world.set_block(world::BlockPos(4, 3, 5), id("oak_leaves"));
+    world.set_block(world::BlockPos(6, 3, 5), id("oak_leaves"));
+    world.set_block(world::BlockPos(5, 3, 4), id("oak_leaves"));
+    world.set_block(world::BlockPos(5, 3, 6), id("oak_leaves"));
+    world.set_block(world::BlockPos(5, 4, 5), id("oak_leaves"));
 
     // Mesh each chunk and build GPU meshes.
     let material_layout = renderer.material_layout();
@@ -468,12 +470,19 @@ fn main() {
     // Create a demo world and place some blocks.
     let mut world = world::World::new();
     world.load_chunk(world::ChunkPos(0, 0));
-    world.set_block(world::BlockPos(0, 0, 0), block::BlockId(1));
-    world.set_block(world::BlockPos(1, 0, 0), block::BlockId(2));
-    world.set_block(world::BlockPos(2, 0, 0), block::BlockId(3));
-    // Set axis property on log block at (3,0,0) to x (index 1).
-    let log_id = block::BlockId(7);
-    world.set_block(world::BlockPos(3, 0, 0), log_id);
+    world.set_block(
+        world::BlockPos(0, 0, 0),
+        block::BlockId("stone".to_string()),
+    );
+    world.set_block(
+        world::BlockPos(1, 0, 0),
+        block::BlockId("grass_block".to_string()),
+    );
+    world.set_block(world::BlockPos(2, 0, 0), block::BlockId("dirt".to_string()));
+    world.set_block(
+        world::BlockPos(3, 0, 0),
+        block::BlockId("oak_log".to_string()),
+    );
     if let Some(def) = block_registry
         .iter()
         .find(|(id, _)| id.path() == "oak_log")

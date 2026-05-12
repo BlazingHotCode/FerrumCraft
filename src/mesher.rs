@@ -21,10 +21,10 @@ pub struct MeshData {
 }
 
 /// Meshes a single chunk using per-face texture UVs from block models.
-/// `model_map` maps BlockId.0 → BlockModel.
+/// `model_map` maps block path string → BlockModel.
 pub fn mesh_chunk(
     chunk: &Chunk,
-    model_map: &HashMap<u16, BlockModel>,
+    model_map: &HashMap<String, BlockModel>,
     atlas: &TextureAtlas,
 ) -> MeshData {
     let blocks = chunk.blocks();
@@ -38,18 +38,23 @@ pub fn mesh_chunk(
             let base_zy = base_y + z * SX;
             for x in 0..SX {
                 let idx = base_zy + x;
-                let block = blocks[idx];
-                if block == BlockId::AIR {
+                let block = &blocks[idx];
+                if block.0.is_empty() {
                     continue;
                 }
 
                 let model = model_map.get(&block.0);
+
+                fn is_transparent(b: &BlockId) -> bool {
+                    b.0.is_empty() || b.0 == "water"
+                }
+
                 let fx = x as f32;
                 let fy = y as f32;
                 let fz = z as f32;
 
                 // Right (+X)
-                if x + 1 >= SX || blocks[idx + 1] == BlockId::AIR || blocks[idx + 1].0 == 5 {
+                if x + 1 >= SX || is_transparent(&blocks[idx + 1]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Right)));
                     let q = quad(0, fx, fy, fz, uv);
                     verts.extend_from_slice(&q.vertices);
@@ -57,7 +62,7 @@ pub fn mesh_chunk(
                     off += 4;
                 }
                 // Left (-X)
-                if x == 0 || blocks[idx - 1] == BlockId::AIR || blocks[idx - 1].0 == 5 {
+                if x == 0 || is_transparent(&blocks[idx - 1]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Left)));
                     let q = quad(1, fx, fy, fz, uv);
                     verts.extend_from_slice(&q.vertices);
@@ -65,8 +70,7 @@ pub fn mesh_chunk(
                     off += 4;
                 }
                 // Top (+Y)
-                if y + 1 >= SY || blocks[idx + SLICE] == BlockId::AIR || blocks[idx + SLICE].0 == 5
-                {
+                if y + 1 >= SY || is_transparent(&blocks[idx + SLICE]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Top)));
                     let q = quad(2, fx, fy, fz, uv);
                     verts.extend_from_slice(&q.vertices);
@@ -74,7 +78,7 @@ pub fn mesh_chunk(
                     off += 4;
                 }
                 // Bottom (-Y)
-                if y == 0 || blocks[idx - SLICE] == BlockId::AIR || blocks[idx - SLICE].0 == 5 {
+                if y == 0 || is_transparent(&blocks[idx - SLICE]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Bottom)));
                     let q = quad(3, fx, fy, fz, uv);
                     verts.extend_from_slice(&q.vertices);
@@ -82,7 +86,7 @@ pub fn mesh_chunk(
                     off += 4;
                 }
                 // Front (+Z)
-                if z + 1 >= SZ || blocks[idx + SX] == BlockId::AIR || blocks[idx + SX].0 == 5 {
+                if z + 1 >= SZ || is_transparent(&blocks[idx + SX]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Front)));
                     let q = quad(4, fx, fy, fz, uv);
                     verts.extend_from_slice(&q.vertices);
@@ -90,7 +94,47 @@ pub fn mesh_chunk(
                     off += 4;
                 }
                 // Back (-Z)
-                if z == 0 || blocks[idx - SX] == BlockId::AIR || blocks[idx - SX].0 == 5 {
+                if z == 0 || is_transparent(&blocks[idx - SX]) {
+                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Back)));
+                    let q = quad(5, fx, fy, fz, uv);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Left (-X)
+                if x == 0 || is_transparent(&blocks[idx - 1]) {
+                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Left)));
+                    let q = quad(1, fx, fy, fz, uv);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Top (+Y)
+                if y + 1 >= SY || is_transparent(&blocks[idx + SLICE]) {
+                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Top)));
+                    let q = quad(2, fx, fy, fz, uv);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Bottom (-Y)
+                if y == 0 || is_transparent(&blocks[idx - SLICE]) {
+                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Bottom)));
+                    let q = quad(3, fx, fy, fz, uv);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Front (+Z)
+                if z + 1 >= SZ || is_transparent(&blocks[idx + SX]) {
+                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Front)));
+                    let q = quad(4, fx, fy, fz, uv);
+                    verts.extend_from_slice(&q.vertices);
+                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
+                    off += 4;
+                }
+                // Back (-Z)
+                if z == 0 || is_transparent(&blocks[idx - SX]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Back)));
                     let q = quad(5, fx, fy, fz, uv);
                     verts.extend_from_slice(&q.vertices);

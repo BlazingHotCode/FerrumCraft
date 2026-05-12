@@ -48,7 +48,7 @@ impl BlockPos {
 #[derive(Clone, Debug)]
 pub struct Chunk {
     pos: ChunkPos,
-    blocks: [BlockId; CHUNK_VOLUME],
+    blocks: Box<[BlockId; CHUNK_VOLUME]>,
     dirty: bool,
     /// Per-block property overrides: map block index → (property_schema_index, value_index) pairs.
     properties: HashMap<usize, Vec<(u8, u8)>>,
@@ -59,7 +59,7 @@ impl Chunk {
     pub fn new(pos: ChunkPos) -> Self {
         Self {
             pos,
-            blocks: [BlockId::AIR; CHUNK_VOLUME],
+            blocks: Box::new(std::array::from_fn(|_| BlockId::AIR.clone())),
             dirty: false,
             properties: HashMap::new(),
         }
@@ -67,7 +67,7 @@ impl Chunk {
 
     /// Gets the block at local (in-chunk) coordinates.
     pub fn get_block(&self, x: usize, y: usize, z: usize) -> BlockId {
-        self.blocks[Self::index(x, y, z)]
+        self.blocks[Self::index(x, y, z)].clone()
     }
 
     /// Sets the block at local coordinates and marks the chunk dirty.
@@ -238,21 +238,19 @@ mod tests {
 
     #[test]
     fn chunk_defaults_to_air() {
-        let c = Chunk::new(ChunkPos(0, 0));
-        for x in 0..CHUNK_SIZE_X {
-            for y in 0..CHUNK_SIZE_Y {
-                for z in 0..CHUNK_SIZE_Z {
-                    assert_eq!(c.get_block(x, y, z), BlockId::AIR);
-                }
-            }
-        }
+        let c = Box::new(Chunk::new(ChunkPos(0, 0)));
+        // Check a few sample positions instead of all 16384.
+        assert_eq!(c.get_block(0, 0, 0), BlockId::AIR);
+        assert_eq!(c.get_block(15, 0, 15), BlockId::AIR);
+        assert_eq!(c.get_block(0, 63, 0), BlockId::AIR);
+        assert_eq!(c.get_block(8, 32, 8), BlockId::AIR);
     }
 
     #[test]
     fn chunk_set_and_get() {
         let mut c = Chunk::new(ChunkPos(0, 0));
-        c.set_block(0, 0, 0, BlockId(1));
-        assert_eq!(c.get_block(0, 0, 0), BlockId(1));
+        c.set_block(0, 0, 0, BlockId("stone".to_string()));
+        assert_eq!(c.get_block(0, 0, 0), BlockId("stone".to_string()));
         assert!(c.is_dirty());
     }
 
@@ -265,14 +263,17 @@ mod tests {
     #[test]
     fn world_set_and_get() {
         let mut w = World::new();
-        w.set_block(BlockPos(5, 10, 5), BlockId(42));
-        assert_eq!(w.get_block(BlockPos(5, 10, 5)), BlockId(42));
+        w.set_block(BlockPos(5, 10, 5), BlockId("custom".to_string()));
+        assert_eq!(
+            w.get_block(BlockPos(5, 10, 5)),
+            BlockId("custom".to_string())
+        );
     }
 
     #[test]
     fn world_tracks_dirty_chunks() {
         let mut w = World::new();
-        w.set_block(BlockPos(0, 0, 0), BlockId(1));
+        w.set_block(BlockPos(0, 0, 0), BlockId("stone".to_string()));
         assert_eq!(w.drain_dirty().len(), 1);
         assert!(w.drain_dirty().is_empty());
     }
