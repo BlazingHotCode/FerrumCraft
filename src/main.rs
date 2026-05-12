@@ -15,6 +15,7 @@ mod id;
 mod input;
 mod lang;
 mod logging;
+mod model;
 mod registry;
 mod renderer;
 mod resource;
@@ -292,6 +293,15 @@ fn main() {
 
     let block_registry = block::register_core_blocks();
     log::info!(target: "blocks", "Registered {} core block types", block_registry.len());
+
+    // Collect block IDs and load their models (skip air).
+    let block_ids: Vec<_> = block_registry
+        .iter()
+        .map(|(id, _)| id.clone())
+        .filter(|id| id.path() != "air")
+        .collect();
+    let block_models = model::load_block_models(&_resources, "ferrumcraft", &block_ids);
+    log::info!(target: "models", "Loaded {} block models", block_models.len());
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
