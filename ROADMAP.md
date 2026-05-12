@@ -17,7 +17,7 @@ refined as adjacent systems mature.
 - [x] Basic shaders + material/color pipeline
 - [x] Fixed timestep game update loop
 - [x] Debug overlay (FPS, frame time, player/chunk position)
-- [ ] Structured logging system (log levels, categories, console/file output)
+- [x] Structured logging system (log levels, categories, console/file output)
 
 ## Phase 2 - Free Camera Prototype
 - [x] First-person camera with view/projection matrices

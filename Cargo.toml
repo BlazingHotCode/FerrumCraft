@@ -18,5 +18,7 @@ winit = "0.30"
 wgpu = "24"
 # Blocks on async GPU setup during application startup.
 pollster = "0.4"
+# Structured logging facade.
+log = "0.4"
 
 

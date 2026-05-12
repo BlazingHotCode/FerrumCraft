@@ -4,10 +4,15 @@
 //! and renderer frame loop. Game state should move into dedicated modules as it
 //! grows; this file should stay focused on top-level orchestration.
 
+// Many data/resource types are defined but not yet consumed by the running app.
+// Remove this once gameplay systems use the registries and resource manager.
+#![allow(dead_code)]
+
 mod camera;
 mod debug;
 mod id;
 mod input;
+mod logging;
 mod renderer;
 mod resource;
 mod window;
@@ -131,6 +136,7 @@ impl ApplicationHandler for App {
                             self.input.end_frame();
                         }
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            log::warn!(target: "renderer", "Surface lost, reconfiguring");
                             let Some(window) = &self.window else {
                                 return;
                             };
@@ -138,7 +144,10 @@ impl ApplicationHandler for App {
                             renderer.resize(size.width, size.height);
                             window.request_redraw();
                         }
-                        Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                        Err(wgpu::SurfaceError::OutOfMemory) => {
+                            log::error!(target: "renderer", "Out of graphics memory, exiting");
+                            event_loop.exit();
+                        }
                         Err(wgpu::SurfaceError::Timeout) => {}
                         Err(wgpu::SurfaceError::Other) => {}
                     }
@@ -262,6 +271,10 @@ fn free_fly_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
 }
 
 fn main() {
+    logging::init().expect("Failed to initialize logger");
+    log::info!(target: "startup", "FerrumCraft v{} initializing", env!("CARGO_PKG_VERSION"));
+    // Set FERRUM_LOG=debug to see more detail.
+
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {

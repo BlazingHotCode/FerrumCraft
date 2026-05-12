@@ -54,6 +54,9 @@ impl Renderer {
             .await
             .expect("Failed to request adapter");
 
+        let info = adapter.get_info();
+        log::info!(target: "renderer", "Adapter: {} ({:?})", info.name, info.backend);
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await
@@ -62,6 +65,7 @@ impl Renderer {
         let config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .expect("Failed to get default surface config");
+        log::info!(target: "renderer", "Surface config: {}x{} {:?}", config.width, config.height, config.format);
         surface.configure(&device, &config);
 
         let pipelines = RenderPipelines::new(&device, config.format);

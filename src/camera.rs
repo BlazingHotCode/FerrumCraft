@@ -24,6 +24,7 @@ pub struct FirstPersonCamera {
 impl FirstPersonCamera {
     /// Creates a camera looking toward the debug shapes from player eye height.
     pub fn new(width: u32, height: u32) -> Self {
+        log::debug!(target: "camera", "Spawning at (0.0, 1.62, 3.5) looking {:.1}° yaw, {:.1}° pitch", -90.0, -12.0);
         Self {
             position: Vec3::new(0.0, 1.62, 3.5),
             yaw: -90.0_f32.to_radians(),
