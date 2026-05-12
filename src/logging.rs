@@ -3,10 +3,11 @@
 //! The logger is initialized once at startup and accepts standard `log` crate
 //! macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`). Each log entry
 //! includes a category string (the Rust module path by default), the severity
-//! level, and the message.
+//! level, the message, and an HH:MM:SS.mmm timestamp.
 //!
-//! Logs are written to stdout and to `logs/ferrumcraft_<timestamp>.log`.
-//! The `logs/` directory is gitignored.
+//! Logs are written to stdout and to the system app data directory
+//! (`<APP_DATA>/ferrumcraft/logs/ferrumcraft_<timestamp>.log`).
+//! The log directory is created automatically on first run.
 //!
 //! Environment variable `FERRUM_LOG` controls the minimum level:
 //!   `error`, `warn`, `info`, `debug`, `trace`
@@ -28,6 +29,9 @@ static LOGGER: FerrumLogger = FerrumLogger::new();
 /// File handle for writing log output to disk.
 static LOG_FILE: Mutex<Option<fs::File>> = Mutex::new(None);
 
+/// Directory for runtime log files relative to the app data root.
+const LOG_SUBDIR: &str = "logs";
+
 /// Initializes the FerrumCraft logger.
 ///
 /// Call this once near the start of `main()`.
@@ -40,10 +44,12 @@ pub fn init() -> Result<(), SetLoggerError> {
         None => LevelFilter::Info,
     };
 
-    // Create logs/ directory and open a timestamped log file.
-    let _ = fs::create_dir_all("logs");
+    // Determine the app data directory and create log path.
+    let app_dir = app_data_dir();
+    let log_dir = app_dir.join(LOG_SUBDIR);
+    let _ = fs::create_dir_all(&log_dir);
     let timestamp = chrono_for_filename();
-    let log_path = format!("logs/ferrumcraft_{timestamp}.log");
+    let log_path = log_dir.join(format!("ferrumcraft_{timestamp}.log"));
 
     match fs::File::create(&log_path) {
         Ok(file) => {
@@ -51,18 +57,30 @@ pub fn init() -> Result<(), SetLoggerError> {
             *guard = Some(file);
             let _ = writeln!(
                 std::io::stdout().lock(),
-                "[ INFO] logging: Writing logs to {log_path}"
+                "[ INFO] logging: Writing logs to {}",
+                log_path.display()
             );
         }
         Err(e) => {
             let _ = writeln!(
                 std::io::stdout().lock(),
-                "[WARN ] logging: Failed to create log file {log_path}: {e}"
+                "[WARN ] logging: Failed to create log file {}: {e}",
+                log_path.display()
             );
         }
     }
 
     log::set_logger(&LOGGER).map(|()| log::set_max_level(level))
+}
+
+/// Returns the OS-appropriate application data directory for FerrumCraft.
+///
+/// - Windows: `%APPDATA%/FerrumCraft`
+/// - macOS: `~/Library/Application Support/com.ferrumcraft`
+/// - Linux: `~/.local/share/ferrumcraft`
+pub fn app_data_dir() -> std::path::PathBuf {
+    let base = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    base.join("FerrumCraft")
 }
 
 struct FerrumLogger;

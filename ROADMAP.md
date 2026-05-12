@@ -140,10 +140,30 @@ refined as adjacent systems mature.
 - [ ] Serialize modified chunks
 - [ ] Load existing worlds from disk
 - [ ] Save dirty chunks incrementally
-- [ ] Main menu with create/load world
-- [ ] Pause menu with save and quit
+- [ ] App data directory structure (logs, saves, config, screenshots)
+- [ ] User settings saved to config file in app data directory
 
-## Phase 13 - Entities And Mobs
+## Phase 13 - UI And Menus
+- [ ] Main menu screen (title, singleplayer, multiplayer placeholder, settings, quit)
+- [ ] Title screen background / panorama
+- [ ] Button navigation with keyboard and mouse
+- [ ] Pause menu (resume, save and quit, settings, quit to title)
+- [ ] Settings menu with categories (video, audio, controls)
+- [ ] Render distance slider in video settings
+- [ ] Mouse sensitivity slider in controls settings
+- [ ] Volume sliders in audio settings
+- [ ] Keybind/controls screen with rebindable actions
+- [ ] World selection / load world screen
+- [ ] New world creation screen (world name, seed)
+- [ ] World deletion confirmation dialog
+- [ ] Hotbar HUD element
+- [ ] Crosshair HUD element
+- [ ] Debug screen (F3) accessible from pause menu
+- [ ] Settings persistence: save/load all settings to/from config file in app data
+- [ ] Language selection in settings (loads different lang files)
+- [ ] Accessibility options (UI scale, color blind mode placeholder)
+
+## Phase 14 - Entities And Mobs
 - [ ] Entity registry with namespaced string IDs
 - [ ] Data-driven entity components (health, collision, gravity, AI goals, drops)
 - [ ] Entity system with transforms and velocity
@@ -181,9 +201,6 @@ refined as adjacent systems mature.
 - [ ] Footstep, dig, place, pickup, and ambient audio
 - [ ] Block particles for breaking
 - [ ] Hand/item view model
-- [ ] Settings menu (render distance, sensitivity, volume)
-- [ ] Config files for user settings separate from world saves
-- [ ] Keybind action registry and keybind configuration
 - [ ] Command system for debug/game commands
 - [ ] Screenshot/debug capture tools
 - [ ] Packaging/release build workflow

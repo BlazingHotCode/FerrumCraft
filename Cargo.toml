@@ -20,5 +20,7 @@ wgpu = "24"
 pollster = "0.4"
 # Structured logging facade.
 log = "0.4"
+# Cross-platform standard directories (app data, config, etc.).
+dirs = "5"
 
 
