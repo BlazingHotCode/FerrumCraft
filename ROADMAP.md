@@ -21,7 +21,9 @@ refined as adjacent systems mature.
 ## Phase 2 - First-Person Player
 - [x] First-person camera with view/projection matrices
 - [x] Mouse look with pointer lock
-- [ ] WASD movement, jump, crouch, and sprint
+- [ ] Free-fly world-axis movement (WASD horizontal, Space up, Shift down)
+- [ ] Grounded WASD movement relative to camera yaw
+- [ ] Jump, crouch, and sprint movement states
 - [ ] Player collision capsule/AABB against blocks
 - [ ] Gravity and grounded/falling state
 - [ ] Reach raycast from camera center
