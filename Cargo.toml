@@ -5,6 +5,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Plain-old-data derives for safely uploading typed vertex/uniform data to wgpu.
+bytemuck = { version = "1", features = ["derive"] }
+# Small math library used for camera and projection matrices.
+glam = "0.29"
 # Window and event-loop integration.
 winit = "0.30"
 # Cross-platform GPU abstraction used by the renderer.
