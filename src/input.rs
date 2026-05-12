@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 /// Input state accumulated from window events.
@@ -70,6 +70,14 @@ impl InputState {
         }
     }
 
+    /// Updates tracked input state from device-level events.
+    pub fn handle_device_event(&mut self, event: &DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta } = event {
+            self.cursor_delta.0 += delta.0;
+            self.cursor_delta.1 += delta.1;
+        }
+    }
+
     /// Returns whether a physical keyboard key is currently pressed.
     #[allow(dead_code)]
     pub fn is_key_pressed(&self, key: KeyCode) -> bool {
@@ -101,11 +109,17 @@ impl InputState {
         self.cursor_delta
     }
 
+    /// Returns and clears accumulated cursor movement.
+    pub fn take_cursor_delta(&mut self) -> (f64, f64) {
+        let delta = self.cursor_delta;
+        self.cursor_delta = (0.0, 0.0);
+        delta
+    }
+
     /// Resets frame-local input data while preserving held buttons and keys.
     pub fn end_frame(&mut self) {
         self.just_pressed_keys.clear();
         self.debug_overlay_toggle_requested = false;
-        self.cursor_delta = (0.0, 0.0);
     }
 
     fn clear(&mut self) {

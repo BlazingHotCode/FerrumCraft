@@ -20,7 +20,7 @@ refined as adjacent systems mature.
 
 ## Phase 2 - First-Person Player
 - [x] First-person camera with view/projection matrices
-- [ ] Mouse look with pointer lock
+- [x] Mouse look with pointer lock
 - [ ] WASD movement, jump, crouch, and sprint
 - [ ] Player collision capsule/AABB against blocks
 - [ ] Gravity and grounded/falling state

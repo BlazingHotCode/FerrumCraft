@@ -7,6 +7,7 @@ use winit::dpi::PhysicalSize;
 use winit::error::OsError;
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
+use winit::window::CursorGrabMode;
 use winit::window::Window as WinitWindow;
 use winit::window::WindowId;
 
@@ -40,6 +41,19 @@ impl Window {
     /// Queues a redraw request for the next event-loop cycle.
     pub fn request_redraw(&self) {
         self.inner.request_redraw();
+    }
+
+    /// Enables or disables Minecraft-style cursor capture.
+    pub fn set_pointer_locked(&self, locked: bool) {
+        if locked {
+            if self.inner.set_cursor_grab(CursorGrabMode::Locked).is_err() {
+                let _ = self.inner.set_cursor_grab(CursorGrabMode::Confined);
+            }
+        } else {
+            let _ = self.inner.set_cursor_grab(CursorGrabMode::None);
+        }
+
+        self.inner.set_cursor_visible(!locked);
     }
 }
 

@@ -16,6 +16,8 @@ use camera::FirstPersonCamera;
 use debug::DebugOverlay;
 use input::InputState;
 use winit::application::ApplicationHandler;
+use winit::event::DeviceEvent;
+use winit::event::MouseButton;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::event_loop::ControlFlow;
@@ -35,6 +37,7 @@ struct App {
     camera: Option<FirstPersonCamera>,
     input: InputState,
     debug_overlay: DebugOverlay,
+    pointer_locked: bool,
     last_update: Instant,
     fixed_update_accumulator: Duration,
 }
@@ -63,10 +66,12 @@ impl ApplicationHandler for App {
         window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let Some(window) = &self.window else {
-            return;
-        };
-        if window.id() != window_id {
+        let is_app_window = self
+            .window
+            .as_ref()
+            .map(|window| window.id() == window_id)
+            .unwrap_or(false);
+        if !is_app_window {
             return;
         }
 
@@ -77,6 +82,23 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Focused(false) => {
+                self.set_pointer_locked(false);
+            }
+            WindowEvent::KeyboardInput { .. }
+                if self
+                    .input
+                    .was_key_just_pressed(winit::keyboard::KeyCode::Escape) =>
+            {
+                self.set_pointer_locked(false);
+            }
+            WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.set_pointer_locked(true);
+            }
             WindowEvent::Resized(size) => {
                 if let Some(camera) = &mut self.camera {
                     camera.resize(size.width, size.height);
@@ -87,7 +109,9 @@ impl ApplicationHandler for App {
                         renderer.set_view_projection(camera.view_projection());
                     }
                 }
-                window.request_redraw();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
             }
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = &mut self.renderer {
@@ -99,6 +123,9 @@ impl ApplicationHandler for App {
                             self.input.end_frame();
                         }
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            let Some(window) = &self.window else {
+                                return;
+                            };
                             let size = window.inner.inner_size();
                             renderer.resize(size.width, size.height);
                             window.request_redraw();
@@ -110,6 +137,23 @@ impl ApplicationHandler for App {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        if self.pointer_locked {
+            self.input.handle_device_event(&event);
+            let delta = self.input.take_cursor_delta();
+            if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
+                camera.apply_mouse_delta(delta);
+                renderer.set_view_projection(camera.view_projection());
+                self.debug_overlay.set_player_position(camera.position());
+            }
         }
     }
 
@@ -143,9 +187,16 @@ impl App {
     fn fixed_update(&mut self, _dt: Duration) {
         // Match Minecraft's 20 ticks-per-second simulation rate while rendering
         // stays independent and can run at a higher frame rate.
-        if let (Some(camera), Some(renderer)) = (&self.camera, &mut self.renderer) {
+        if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
             renderer.set_view_projection(camera.view_projection());
             self.debug_overlay.set_player_position(camera.position());
+        }
+    }
+
+    fn set_pointer_locked(&mut self, locked: bool) {
+        self.pointer_locked = locked;
+        if let Some(window) = &self.window {
+            window.set_pointer_locked(locked);
         }
     }
 }
@@ -159,6 +210,7 @@ fn main() {
         camera: None,
         input: InputState::default(),
         debug_overlay: DebugOverlay::default(),
+        pointer_locked: false,
         last_update: Instant::now(),
         fixed_update_accumulator: Duration::ZERO,
     };

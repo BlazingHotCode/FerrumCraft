@@ -6,6 +6,9 @@
 
 use glam::{Mat4, Vec3};
 
+const MOUSE_SENSITIVITY: f32 = 0.0025;
+const MAX_PITCH: f32 = 89.0_f32.to_radians();
+
 /// Camera used for Minecraft-style first-person rendering.
 #[derive(Debug)]
 pub struct FirstPersonCamera {
@@ -35,6 +38,12 @@ impl FirstPersonCamera {
     /// Updates the projection aspect ratio after a window resize.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.aspect = aspect(width, height);
+    }
+
+    /// Applies raw mouse movement to yaw/pitch orientation.
+    pub fn apply_mouse_delta(&mut self, delta: (f64, f64)) {
+        self.yaw += delta.0 as f32 * MOUSE_SENSITIVITY;
+        self.pitch = (self.pitch - delta.1 as f32 * MOUSE_SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
     /// Combined view/projection matrix consumed by the renderer.
