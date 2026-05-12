@@ -314,13 +314,28 @@ fn build_chunk_meshes(
             world.set_block(world::BlockPos(x as i32, 1, z as i32), id("grass_block"));
         }
     }
-    // A few features: stone pillar, sand patch, log, leaves.
+    // A few features: stone pillar, material patches, log, leaves.
     for y in 2..5 {
         world.set_block(world::BlockPos(2, y, 2), id("stone"));
     }
     for x in 10..14 {
         for z in 10..14 {
             world.set_block(world::BlockPos(x, 1, z), id("sand"));
+        }
+    }
+    for x in 10..14 {
+        for z in 4..8 {
+            world.set_block(world::BlockPos(x, 1, z), id("glass"));
+        }
+    }
+    for x in 4..8 {
+        for z in 10..14 {
+            world.set_block(world::BlockPos(x, 1, z), id("oak_planks"));
+        }
+    }
+    for x in 1..5 {
+        for z in 10..14 {
+            world.set_block(world::BlockPos(x, 1, z), id("water"));
         }
     }
     world.set_block(world::BlockPos(5, 2, 5), id("oak_log"));
