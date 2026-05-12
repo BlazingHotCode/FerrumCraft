@@ -17,6 +17,7 @@ refined as adjacent systems mature.
 - [x] Basic shaders + material/color pipeline
 - [x] Fixed timestep game update loop
 - [x] Debug overlay (FPS, frame time, player/chunk position)
+- [ ] Structured logging system (log levels, categories, console/file output)
 
 ## Phase 2 - Free Camera Prototype
 - [x] First-person camera with view/projection matrices
@@ -25,8 +26,8 @@ refined as adjacent systems mature.
 
 ## Phase 3 - Data And Resource System
 - [x] Namespaced string IDs (`ferrumcraft:stone`) for blocks, items, entities, recipes, loot tables, and tags
-- [ ] Asset/resource directory layout inspired by Minecraft (`assets/<namespace>/...`, `data/<namespace>/...`)
-- [ ] Resource loader for JSON files and textures
+- [x] Asset/resource directory layout inspired by Minecraft (`assets/<namespace>/...`, `data/<namespace>/...`)
+- [x] Resource loader for JSON files and textures
 - [ ] Registry bootstrap order for blocks, items, entities, biomes, features, sounds, particles, screens, commands, and dimensions
 - [ ] Language files for display names (`assets/<namespace>/lang/en_us.json`)
 - [ ] Block model JSON files (`assets/<namespace>/models/block/*.json`)

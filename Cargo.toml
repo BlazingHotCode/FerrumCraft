@@ -9,9 +9,14 @@ edition = "2024"
 bytemuck = { version = "1", features = ["derive"] }
 # Small math library used for camera and projection matrices.
 glam = "0.29"
+# JSON deserialization for game data files.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 # Window and event-loop integration.
 winit = "0.30"
 # Cross-platform GPU abstraction used by the renderer.
 wgpu = "24"
 # Blocks on async GPU setup during application startup.
 pollster = "0.4"
+
+

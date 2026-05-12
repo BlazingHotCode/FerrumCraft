@@ -9,6 +9,7 @@ mod debug;
 mod id;
 mod input;
 mod renderer;
+mod resource;
 mod window;
 
 use std::time::{Duration, Instant};
