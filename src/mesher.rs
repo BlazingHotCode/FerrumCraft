@@ -13,6 +13,25 @@ const SX: usize = 16;
 const SY: usize = 64;
 const SZ: usize = 16;
 const SLICE: usize = SX * SZ;
+const LOWERED_WATER_HEIGHT: f32 = 14.0 / 16.0;
+
+fn is_transparent(b: &BlockId) -> bool {
+    matches!(b.0.as_str(), "water" | "glass" | "oak_leaves")
+}
+
+fn face_visible(current: &BlockId, neighbor: &BlockId) -> bool {
+    if neighbor.0.is_empty() {
+        return true;
+    }
+
+    is_transparent(neighbor) && neighbor != current
+}
+
+fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Quad) {
+    verts.extend_from_slice(&q.vertices);
+    inds.extend_from_slice(&[*off, *off + 1, *off + 2, *off, *off + 2, *off + 3]);
+    *off += 4;
+}
 
 /// Output of the mesher.
 pub struct MeshData {
@@ -28,9 +47,12 @@ pub fn mesh_chunk(
     atlas: &TextureAtlas,
 ) -> MeshData {
     let blocks = chunk.blocks();
-    let mut verts = Vec::new();
-    let mut inds = Vec::new();
-    let mut off: u16 = 0;
+    let mut opaque_verts = Vec::new();
+    let mut opaque_inds = Vec::new();
+    let mut opaque_off: u16 = 0;
+    let mut transparent_verts = Vec::new();
+    let mut transparent_inds = Vec::new();
+    let mut transparent_off: u16 = 0;
 
     for y in 0..SY {
         let base_y = y * SLICE;
@@ -44,110 +66,73 @@ pub fn mesh_chunk(
                 }
 
                 let model = model_map.get(&block.0);
-
-                fn is_transparent(b: &BlockId) -> bool {
-                    b.0.is_empty() || b.0 == "water"
-                }
+                let (verts, inds, off) = if is_transparent(block) {
+                    (
+                        &mut transparent_verts,
+                        &mut transparent_inds,
+                        &mut transparent_off,
+                    )
+                } else {
+                    (&mut opaque_verts, &mut opaque_inds, &mut opaque_off)
+                };
 
                 let fx = x as f32;
                 let fy = y as f32;
                 let fz = z as f32;
+                let top_height =
+                    if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
+                        LOWERED_WATER_HEIGHT
+                    } else {
+                        1.0
+                    };
 
                 // Right (+X)
-                if x + 1 >= SX || is_transparent(&blocks[idx + 1]) {
+                if x + 1 >= SX || face_visible(block, &blocks[idx + 1]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Right)));
-                    let q = quad(0, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
+                    let q = quad(0, fx, fy, fz, uv, top_height);
+                    push_quad(verts, inds, off, q);
                 }
                 // Left (-X)
-                if x == 0 || is_transparent(&blocks[idx - 1]) {
+                if x == 0 || face_visible(block, &blocks[idx - 1]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Left)));
-                    let q = quad(1, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
+                    let q = quad(1, fx, fy, fz, uv, top_height);
+                    push_quad(verts, inds, off, q);
                 }
                 // Top (+Y)
-                if y + 1 >= SY || is_transparent(&blocks[idx + SLICE]) {
+                if y + 1 >= SY || face_visible(block, &blocks[idx + SLICE]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Top)));
-                    let q = quad(2, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
+                    let q = quad(2, fx, fy, fz, uv, top_height);
+                    push_quad(verts, inds, off, q);
                 }
                 // Bottom (-Y)
-                if y == 0 || is_transparent(&blocks[idx - SLICE]) {
+                if y == 0 || face_visible(block, &blocks[idx - SLICE]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Bottom)));
-                    let q = quad(3, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
+                    let q = quad(3, fx, fy, fz, uv, top_height);
+                    push_quad(verts, inds, off, q);
                 }
                 // Front (+Z)
-                if z + 1 >= SZ || is_transparent(&blocks[idx + SX]) {
+                if z + 1 >= SZ || face_visible(block, &blocks[idx + SX]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Front)));
-                    let q = quad(4, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
+                    let q = quad(4, fx, fy, fz, uv, top_height);
+                    push_quad(verts, inds, off, q);
                 }
                 // Back (-Z)
-                if z == 0 || is_transparent(&blocks[idx - SX]) {
+                if z == 0 || face_visible(block, &blocks[idx - SX]) {
                     let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Back)));
-                    let q = quad(5, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
-                }
-                // Left (-X)
-                if x == 0 || is_transparent(&blocks[idx - 1]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Left)));
-                    let q = quad(1, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
-                }
-                // Top (+Y)
-                if y + 1 >= SY || is_transparent(&blocks[idx + SLICE]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Top)));
-                    let q = quad(2, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
-                }
-                // Bottom (-Y)
-                if y == 0 || is_transparent(&blocks[idx - SLICE]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Bottom)));
-                    let q = quad(3, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
-                }
-                // Front (+Z)
-                if z + 1 >= SZ || is_transparent(&blocks[idx + SX]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Front)));
-                    let q = quad(4, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
-                }
-                // Back (-Z)
-                if z == 0 || is_transparent(&blocks[idx - SX]) {
-                    let uv = model.map_or([0.0; 4], |m| atlas.uv(&m.texture(Face::Back)));
-                    let q = quad(5, fx, fy, fz, uv);
-                    verts.extend_from_slice(&q.vertices);
-                    inds.extend_from_slice(&[off, off + 1, off + 2, off, off + 2, off + 3]);
-                    off += 4;
+                    let q = quad(5, fx, fy, fz, uv, top_height);
+                    push_quad(verts, inds, off, q);
                 }
             }
         }
     }
 
+    let index_offset = opaque_verts.len() as u16;
+    opaque_inds.extend(transparent_inds.into_iter().map(|i| i + index_offset));
+    opaque_verts.extend(transparent_verts);
+
     MeshData {
-        vertices: verts,
-        indices: inds,
+        vertices: opaque_verts,
+        indices: opaque_inds,
     }
 }
 
@@ -156,7 +141,7 @@ struct Quad {
     vertices: [Vertex; 4],
 }
 
-fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4]) -> Quad {
+fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4], top_height: f32) -> Quad {
     let [u0, v0, u1, v1] = uv;
     let off = |v: [f32; 3]| [v[0] + ox - 8.0, v[1] + oy, v[2] + oz - 8.0];
     // Each face: (a,b,c,d) where triangles are a→b→c and a→c→d (CCW outside).
@@ -166,8 +151,8 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4]) -> Quad {
         0 => (
             [
                 [1.0, 0.0, 0.0],
-                [1.0, 1.0, 0.0],
-                [1.0, 1.0, 1.0],
+                [1.0, top_height, 0.0],
+                [1.0, top_height, 1.0],
                 [1.0, 0.0, 1.0],
             ],
             [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
@@ -176,8 +161,8 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4]) -> Quad {
         1 => (
             [
                 [0.0, 0.0, 1.0],
-                [0.0, 1.0, 1.0],
-                [0.0, 1.0, 0.0],
+                [0.0, top_height, 1.0],
+                [0.0, top_height, 0.0],
                 [0.0, 0.0, 0.0],
             ],
             [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
@@ -185,10 +170,10 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4]) -> Quad {
         // Top (+Y)
         2 => (
             [
-                [0.0, 1.0, 0.0],
-                [0.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 0.0],
+                [0.0, top_height, 0.0],
+                [0.0, top_height, 1.0],
+                [1.0, top_height, 1.0],
+                [1.0, top_height, 0.0],
             ],
             [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
         ),
@@ -207,8 +192,8 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4]) -> Quad {
             [
                 [0.0, 0.0, 1.0],
                 [1.0, 0.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [0.0, 1.0, 1.0],
+                [1.0, top_height, 1.0],
+                [0.0, top_height, 1.0],
             ],
             [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
         ),
@@ -217,8 +202,8 @@ fn quad(dir: u8, ox: f32, oy: f32, oz: f32, uv: [f32; 4]) -> Quad {
             [
                 [1.0, 0.0, 0.0],
                 [0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [1.0, 1.0, 0.0],
+                [0.0, top_height, 0.0],
+                [1.0, top_height, 0.0],
             ],
             [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
         ),

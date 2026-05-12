@@ -17,6 +17,7 @@ use crate::resource::{ResourceCategory, ResourceManager};
 
 const TEX_SIZE: u32 = 16;
 const ATLAS_COLS: u32 = 8;
+const WATER_ALPHA: u8 = 210;
 
 pub struct TextureAtlas {
     pub texture: wgpu::Texture,
@@ -87,8 +88,12 @@ impl TextureAtlas {
                 }
             };
 
+            load_texture_meta(resources, namespace, path);
+
             if *path == "block/grass_block_side" {
                 apply_grass_side_overlay(resources, namespace, &mut frames);
+            } else if *path == "block/water_still" {
+                apply_water_overlay(resources, namespace, &mut frames);
             } else {
                 // Apply biome colour tint for grass, leaves, and water.
                 for pixels in &mut frames {
@@ -386,6 +391,16 @@ struct AnimationMeta {
     frametime: Option<u64>,
 }
 
+#[derive(Deserialize)]
+struct TextureMetaFile {
+    texture: Option<TextureMeta>,
+}
+
+#[derive(Deserialize)]
+struct TextureMeta {
+    mipmap_strategy: Option<String>,
+}
+
 fn load_animation_frame_time(
     resources: &ResourceManager,
     namespace: &str,
@@ -402,7 +417,54 @@ fn load_animation_frame_time(
     Some(Duration::from_millis(ticks * 50))
 }
 
+fn load_texture_meta(resources: &ResourceManager, namespace: &str, path: &str) {
+    let meta_path = resources.path(
+        namespace,
+        ResourceCategory::Texture,
+        &format!("{path}.png.mcmeta"),
+    );
+    let Ok(text) = fs::read_to_string(meta_path) else {
+        return;
+    };
+    let Ok(meta) = serde_json::from_str::<TextureMetaFile>(&text) else {
+        return;
+    };
+
+    if let Some(strategy) = meta.texture.and_then(|texture| texture.mipmap_strategy) {
+        log::debug!(target: "textures", "Texture {path} uses mipmap strategy '{strategy}'");
+    }
+}
+
 // ── Procedural texture generation (fallback) ──────────────────────────────
+fn apply_water_overlay(resources: &ResourceManager, namespace: &str, water_frames: &mut [Vec<u8>]) {
+    for frame in water_frames.iter_mut() {
+        apply_biome_tint("block/water_still", frame);
+        set_alpha(frame, WATER_ALPHA);
+    }
+
+    let overlay_path = resources.path(
+        namespace,
+        ResourceCategory::Texture,
+        "block/water_overlay.png",
+    );
+    let mut overlay_frames = match load_png_frames(&overlay_path) {
+        Ok(frames) => frames,
+        Err(e) => {
+            log::warn!(target: "textures", "Failed to load water overlay: {e}");
+            return;
+        }
+    };
+
+    let overlay = &mut overlay_frames[0];
+    apply_biome_tint("block/water_still", overlay);
+    clamp_alpha(overlay, WATER_ALPHA);
+
+    for frame in water_frames {
+        alpha_composite(frame, overlay);
+        set_alpha(frame, WATER_ALPHA);
+    }
+}
+
 fn apply_grass_side_overlay(
     resources: &ResourceManager,
     namespace: &str,
@@ -446,6 +508,19 @@ fn alpha_composite(base: &mut [u8], overlay: &[u8]) {
 fn alpha_blend_channel(base: u8, overlay: u8, alpha: u8) -> u8 {
     let alpha = alpha as u16;
     ((overlay as u16 * alpha + base as u16 * (255 - alpha)) / 255) as u8
+}
+
+fn set_alpha(rgba: &mut [u8], alpha: u8) {
+    for i in 0..(TEX_SIZE * TEX_SIZE) as usize {
+        rgba[i * 4 + 3] = alpha;
+    }
+}
+
+fn clamp_alpha(rgba: &mut [u8], alpha: u8) {
+    for i in 0..(TEX_SIZE * TEX_SIZE) as usize {
+        let idx = i * 4 + 3;
+        rgba[idx] = rgba[idx].min(alpha);
+    }
 }
 
 fn apply_biome_tint(path: &str, rgba: &mut [u8]) {
