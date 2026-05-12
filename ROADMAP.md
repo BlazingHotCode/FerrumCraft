@@ -18,19 +18,13 @@ refined as adjacent systems mature.
 - [x] Fixed timestep game update loop
 - [x] Debug overlay (FPS, frame time, player/chunk position)
 
-## Phase 2 - First-Person Player
+## Phase 2 - Free Camera Prototype
 - [x] First-person camera with view/projection matrices
 - [x] Mouse look with pointer lock
 - [x] Free-fly world-axis movement (WASD horizontal, Space up, Shift down)
-- [ ] Grounded WASD movement relative to camera yaw
-- [ ] Jump, crouch, and sprint movement states
-- [ ] Player collision capsule/AABB against blocks
-- [ ] Gravity and grounded/falling state
-- [ ] Reach raycast from camera center
-- [ ] Crosshair and block face targeting
 
 ## Phase 3 - Blocks And World Data
-- [ ] Block registry with numeric IDs, names, and properties
+- [ ] Block registry with string IDs, names, and properties
 - [ ] Core blocks: air, grass, dirt, stone, sand, water, log, leaves, planks, glass
 - [ ] Block properties: solid, opaque, transparent, liquid, hardness, drops
 - [ ] Chunk storage (16x64x16 initially, expandable later)
@@ -59,7 +53,15 @@ refined as adjacent systems mature.
 - [ ] Async/incremental chunk loading around player
 - [ ] Chunk unload distance
 
-## Phase 6 - Block Interaction
+## Phase 6 - First-Person Player
+- [ ] Grounded WASD movement relative to camera yaw
+- [ ] Jump, crouch, and sprint movement states
+- [ ] Player collision capsule/AABB against blocks
+- [ ] Gravity and grounded/falling state
+
+## Phase 7 - Block Interaction
+- [ ] Reach raycast from camera center
+- [ ] Crosshair and block face targeting
 - [ ] Block highlighting outline on targeted face
 - [ ] Block breaking with hold-click progress and hardness
 - [ ] Block placement on adjacent targeted face
@@ -68,7 +70,7 @@ refined as adjacent systems mature.
 - [ ] Item pickup into inventory
 - [ ] Hotbar selection affects placed block/item
 
-## Phase 7 - Inventory And Crafting
+## Phase 8 - Inventory And Crafting
 - [ ] Item registry linked to block drops and placeable blocks
 - [ ] Player inventory slots
 - [ ] Hotbar UI and selection controls
@@ -79,7 +81,7 @@ refined as adjacent systems mature.
 - [ ] 3x3 crafting table UI
 - [ ] Basic recipes: planks, sticks, crafting table, tools
 
-## Phase 8 - Lighting And Atmosphere
+## Phase 9 - Lighting And Atmosphere
 - [ ] Sky light data per block
 - [ ] Block light data per block
 - [ ] Flood-fill light propagation
@@ -89,7 +91,7 @@ refined as adjacent systems mature.
 - [ ] Sky color, fog, and sun/moon direction
 - [ ] Torch block emitting light
 
-## Phase 9 - Survival Loop
+## Phase 10 - Survival Loop
 - [ ] Health system
 - [ ] Hunger/stamina system
 - [ ] Damage sources (fall damage, drowning, mobs later)
@@ -99,7 +101,7 @@ refined as adjacent systems mature.
 - [ ] Furnace block and smelting recipes
 - [ ] Basic death/respawn flow
 
-## Phase 10 - Persistence
+## Phase 11 - Persistence
 - [ ] Save directory and world metadata
 - [ ] Serialize player state and inventory
 - [ ] Serialize modified chunks
@@ -108,7 +110,7 @@ refined as adjacent systems mature.
 - [ ] Main menu with create/load world
 - [ ] Pause menu with save and quit
 
-## Phase 11 - Entities And Mobs
+## Phase 12 - Entities And Mobs
 - [ ] Entity system with transforms and velocity
 - [ ] Item drop entities
 - [ ] Simple passive mob
@@ -117,7 +119,7 @@ refined as adjacent systems mature.
 - [ ] Basic mob AI: wander, chase, attack
 - [ ] Entity spawning rules by biome/light level
 
-## Phase 12 - Biomes And World Variety
+## Phase 13 - Biomes And World Variety
 - [ ] Biome map generation
 - [ ] Plains, forest, desert, and hills biomes
 - [ ] Biome-specific surface blocks and trees
@@ -125,7 +127,7 @@ refined as adjacent systems mature.
 - [ ] Water bodies and rivers
 - [ ] Structure hook for simple generated features
 
-## Phase 13 - Polish
+## Phase 14 - Polish
 - [ ] Footstep, dig, place, pickup, and ambient audio
 - [ ] Block particles for breaking
 - [ ] Hand/item view model
@@ -134,7 +136,7 @@ refined as adjacent systems mature.
 - [ ] Screenshot/debug capture tools
 - [ ] Packaging/release build workflow
 
-## Phase 14 - Stretch Goals
+## Phase 15 - Stretch Goals
 - [ ] Infinite vertical chunks or taller worlds
 - [ ] Multiplayer client/server prototype
 - [ ] Redstone-like block logic
