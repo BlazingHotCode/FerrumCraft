@@ -55,6 +55,7 @@ struct App {
     renderer: Option<renderer::Renderer>,
     camera: Option<FirstPersonCamera>,
     font: Option<Font>,
+    block_models: Option<crate::registry::Registry<model::BlockModel>>,
     input: InputState,
     debug_overlay: DebugOverlay,
     pointer_locked: bool,
@@ -77,10 +78,31 @@ impl ApplicationHandler for App {
             .font
             .take()
             .expect("Font must be loaded before renderer creation");
+
+        // Recreate resource manager and collect texture paths from block models.
+        let resources = resource::ResourceManager::new(".");
+        let block_models = self.block_models.as_ref().expect("Block models not loaded");
+        let texture_paths: Vec<String> = {
+            let mut paths: Vec<String> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for (_, model) in block_models.iter() {
+                for face in &model::ALL_FACES {
+                    let tex = model.texture(*face);
+                    if !tex.is_empty() && seen.insert(tex.to_string()) {
+                        paths.push(tex.to_string());
+                    }
+                }
+            }
+            paths
+        };
+
         let renderer = pollster::block_on(renderer::Renderer::new(
             w.inner.clone(),
             camera.view_projection(),
             font,
+            &resources,
+            "ferrumcraft",
+            &texture_paths,
         ));
         self.window = Some(w);
         self.renderer = Some(renderer);
@@ -88,7 +110,7 @@ impl ApplicationHandler for App {
 
         // Build chunk meshes and replace debug shapes.
         if let Some(ref mut renderer) = self.renderer {
-            build_chunk_meshes(renderer);
+            build_chunk_meshes(renderer, &block_models);
         }
     }
 
@@ -266,8 +288,19 @@ impl App {
 }
 
 /// Creates a demo world, builds chunk meshes, and sets them on the renderer.
-fn build_chunk_meshes(renderer: &mut renderer::Renderer) {
-    // Create a demo world: a flat platform of grass with a few features.
+fn build_chunk_meshes(
+    renderer: &mut renderer::Renderer,
+    block_models: &crate::registry::Registry<model::BlockModel>,
+) {
+    // Build a BlockId → model lookup map. BlockId(1) = first model.
+    use std::collections::HashMap;
+    let model_map: HashMap<u16, model::BlockModel> = block_models
+        .iter()
+        .enumerate()
+        .map(|(i, (_, m))| ((i + 1) as u16, m.clone()))
+        .collect();
+
+    // Create a demo world.
     let mut world = world::World::new();
     let origin = world::ChunkPos(0, 0);
     world.load_chunk(origin);
@@ -302,7 +335,7 @@ fn build_chunk_meshes(renderer: &mut renderer::Renderer) {
     let mut meshes = Vec::new();
 
     for chunk in world.chunks() {
-        let data = mesher::mesh_chunk(chunk);
+        let data = mesher::mesh_chunk(chunk, &model_map, &renderer.atlas);
         if data.vertices.is_empty() {
             continue;
         }
@@ -443,7 +476,7 @@ fn main() {
     world.set_block(world::BlockPos(3, 0, 0), log_id);
     if let Some(def) = block_registry
         .iter()
-        .find(|(id, _)| id.path() == "log")
+        .find(|(id, _)| id.path() == "oak_log")
         .map(|(_, d)| d)
     {
         world.set_block_property(world::BlockPos(3, 0, 0), 0, 1);
@@ -472,6 +505,7 @@ fn main() {
         renderer: None,
         camera: None,
         font: Some(font),
+        block_models: Some(block_models),
         input: InputState::default(),
         debug_overlay: DebugOverlay::default(),
         pointer_locked: false,

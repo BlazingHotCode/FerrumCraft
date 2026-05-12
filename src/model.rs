@@ -247,8 +247,11 @@ fn resolve_faces(
     };
 
     // Determine the face layout from the parent name.
+    // Face order: [Right, Left, Top, Bottom, Front, Back]
     let face_keys: [&str; 6] = match file.parent.as_deref() {
         Some("builtin/cube_all") | None => ["all"; 6],
+        Some("builtin/cube_bottom_top") => ["side", "side", "top", "bottom", "side", "side"],
+        Some("builtin/cube_column") => ["side", "side", "end", "end", "side", "side"],
         Some(other) => {
             return Err(ModelError::UnknownParent {
                 parent: other.to_string(),
@@ -277,7 +280,10 @@ fn load_parent_textures(
     namespace: &str,
 ) -> Result<HashMap<String, String>, ModelError> {
     // Built-in parents don't need a file on disk.
-    if parent_path == "builtin/cube_all" {
+    if parent_path == "builtin/cube_all"
+        || parent_path == "builtin/cube_bottom_top"
+        || parent_path == "builtin/cube_column"
+    {
         return Ok(HashMap::new());
     }
 

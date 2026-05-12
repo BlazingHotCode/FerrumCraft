@@ -6,12 +6,14 @@
 
 pub use mesh::{Mesh, Vertex};
 pub use overlay::Font;
+pub use texture::TextureAtlas;
 
 mod material;
 mod mesh;
 mod overlay;
 mod pipeline;
 mod scene;
+mod texture;
 
 use std::sync::Arc;
 
@@ -37,11 +39,20 @@ pub struct Renderer {
     scene: Scene,
     pipelines: RenderPipelines,
     overlay: OverlayRenderer,
+    /// Texture atlas loaded from block model texture references.
+    pub atlas: TextureAtlas,
 }
 
 impl Renderer {
     /// Creates the surface, selects an adapter, and initializes renderer state.
-    pub async fn new(window: Arc<Window>, view_projection: Mat4, font: Font) -> Self {
+    pub async fn new(
+        window: Arc<Window>,
+        view_projection: Mat4,
+        font: Font,
+        resources: &crate::resource::ResourceManager,
+        namespace: &str,
+        texture_paths: &[String],
+    ) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let size = window.inner_size();
         let surface = instance
@@ -71,7 +82,11 @@ impl Renderer {
         log::info!(target: "renderer", "Surface config: {}x{} {:?}", config.width, config.height, config.format);
         surface.configure(&device, &config);
 
-        let pipelines = RenderPipelines::new(&device, config.format);
+        let mut pipelines = RenderPipelines::new(&device, config.format);
+        let atlas = TextureAtlas::load(&device, &queue, resources, namespace, texture_paths);
+        let atlas_bg = atlas.bind_group(&device);
+        pipelines.set_texture_bind_group(atlas_bg);
+        log::info!(target: "renderer", "Texture atlas configured for rendering");
         let overlay = OverlayRenderer::new(&device, config.format, font);
         let depth_view = create_depth_view(&device, config.width, config.height);
         let scene = Scene::new(&device, pipelines.material_layout(), view_projection);
@@ -85,6 +100,7 @@ impl Renderer {
             scene,
             pipelines,
             overlay,
+            atlas,
         }
     }
 

@@ -7,6 +7,7 @@ use wgpu::util::DeviceExt;
 
 use super::mesh::Vertex;
 use super::scene::Scene;
+use super::texture::TextureAtlas;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -26,6 +27,8 @@ pub struct RenderPipelines {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     material_bind_group_layout: wgpu::BindGroupLayout,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    texture_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl RenderPipelines {
@@ -83,9 +86,15 @@ impl RenderPipelines {
                 }],
             });
 
+        let texture_bind_group_layout = TextureAtlas::bind_group_layout(device);
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Static mesh pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, &material_bind_group_layout],
+            bind_group_layouts: &[
+                &camera_bind_group_layout,
+                &material_bind_group_layout,
+                &texture_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -130,12 +139,19 @@ impl RenderPipelines {
             camera_buffer,
             camera_bind_group,
             material_bind_group_layout,
+            texture_bind_group_layout,
+            texture_bind_group: None,
         }
     }
 
     /// Bind group layout required by static mesh materials.
     pub fn material_layout(&self) -> &wgpu::BindGroupLayout {
         &self.material_bind_group_layout
+    }
+
+    /// Sets the texture atlas bind group (group 2).
+    pub fn set_texture_bind_group(&mut self, bind_group: wgpu::BindGroup) {
+        self.texture_bind_group = Some(bind_group);
     }
 
     /// Encodes the render passes needed to draw `scene` into `view`.
@@ -180,6 +196,10 @@ impl RenderPipelines {
 
             pass.set_pipeline(&self.static_mesh);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
+            if let Some(ref tex_bg) = self.texture_bind_group {
+                pass.set_bind_group(2, tex_bg, &[]);
+            }
 
             for mesh in scene.meshes() {
                 pass.set_bind_group(1, mesh.material().bind_group(), &[]);

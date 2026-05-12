@@ -323,7 +323,7 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
             ),
         ),
         (
-            "log",
+            "oak_log",
             BlockDefinition::block(
                 "block.log",
                 true,

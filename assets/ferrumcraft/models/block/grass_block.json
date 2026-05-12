@@ -1,1 +1,1 @@
-{"parent":"builtin/cube_all","textures":{"all":"block/grass_block"}}
+{"parent":"builtin/cube_bottom_top","textures":{"top":"block/grass_block_top","side":"block/grass_block_side","bottom":"block/dirt"}}

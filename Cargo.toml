@@ -22,5 +22,7 @@ pollster = "0.4"
 log = "0.4"
 # Cross-platform standard directories (app data, config, etc.).
 dirs = "5"
+# PNG image loading for block textures.
+png = "0.17"
 
 

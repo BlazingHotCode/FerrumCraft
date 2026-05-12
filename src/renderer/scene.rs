@@ -19,12 +19,13 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// Builds the initial scene contents for the current camera matrix.
+    /// Builds an empty scene with a clear colour and no meshes.
     pub fn new(
         device: &wgpu::Device,
         material_layout: &wgpu::BindGroupLayout,
         view_projection: Mat4,
     ) -> Self {
+        let _ = (device, material_layout);
         Self {
             clear_color: wgpu::Color {
                 r: 0.53,
@@ -33,11 +34,7 @@ impl Scene {
                 a: 1.0,
             },
             view_projection,
-            meshes: vec![
-                Mesh::plane(device, material_layout),
-                Mesh::triangle(device, material_layout),
-                Mesh::cube(device, material_layout),
-            ],
+            meshes: Vec::new(),
         }
     }
 

@@ -55,10 +55,10 @@ refined as adjacent systems mature.
 ## Phase 5 - Chunk Rendering
 - [x] Naive block meshing (visible faces only)
 - [x] Chunk vertex/index buffers
-- [ ] Texture atlas generated from model texture references
-- [ ] UV generation from JSON block models
-- [ ] Cube/block model renderer for parented models (e.g. `block/cube_all`, `block/cube_column`)
-- [ ] Basic block material/color mapping from model/block data
+- [x] Texture atlas generated from model texture references
+- [x] UV generation from JSON block models
+- [x] Cube/block model renderer for parented models (e.g. `block/cube_all`, `block/cube_column`)
+- [x] Basic block material/color mapping from model/block data
 - [ ] Depth-tested opaque chunk pass
 - [ ] Transparent block pass for water/glass/leaves
 - [ ] Frustum culling for chunks outside view
