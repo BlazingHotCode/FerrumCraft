@@ -7,7 +7,8 @@ use crate::block::BlockId;
 use crate::model::{BlockModel, Face};
 use crate::renderer::TextureAtlas;
 use crate::renderer::Vertex;
-use crate::world::Chunk;
+use crate::world::{Chunk, World};
+use crate::worldgen::{BiomeSource, NoiseSettings};
 
 const SX: usize = 16;
 const SY: usize = 64;
@@ -48,6 +49,28 @@ fn random_rotation(path: &str, x: usize, y: usize, z: usize, face: Face) -> u8 {
     h ^= (z as u32).wrapping_mul(0xC2B2_AE35);
     h ^= face as u32;
     ((h ^ (h >> 16)) & 3) as u8
+}
+
+fn biome_tint(path: &str, biome: &str) -> [f32; 3] {
+    let rgb = match (path, biome) {
+        ("block/water_still", "desert") => [0x44, 0xaf, 0xd8],
+        ("block/water_still", _) => [0x3f, 0x76, 0xe4],
+        ("block/grass_block_top", "desert") => [0xb7, 0xb7, 0x63],
+        ("block/grass_block_top", "forest") => [0x79, 0xc0, 0x5a],
+        ("block/grass_block_top", "hills") => [0x8a, 0xb6, 0x89],
+        ("block/grass_block_top", _) => [0x91, 0xbd, 0x59],
+        ("block/oak_leaves", "desert") => [0xa0, 0xa7, 0x55],
+        ("block/oak_leaves", "forest") => [0x59, 0xae, 0x30],
+        ("block/oak_leaves", "hills") => [0x71, 0x91, 0x5f],
+        ("block/oak_leaves", _) => [0x77, 0xab, 0x2f],
+        _ => return [1.0, 1.0, 1.0],
+    };
+
+    [
+        rgb[0] as f32 / 255.0,
+        rgb[1] as f32 / 255.0,
+        rgb[2] as f32 / 255.0,
+    ]
 }
 
 fn occludes(blocks: &[BlockId], x: usize, y: usize, z: usize, dx: i32, dy: i32, dz: i32) -> bool {
@@ -132,19 +155,23 @@ fn face_ao(blocks: &[BlockId], x: usize, y: usize, z: usize, dir: u8) -> [f32; 4
     ]
 }
 
-fn face_uv(
-    model: Option<&BlockModel>,
+fn face_uv<'a>(
+    model: Option<&'a BlockModel>,
     atlas: &TextureAtlas,
     face: Face,
     x: usize,
     y: usize,
     z: usize,
-) -> ([f32; 4], u8) {
+) -> ([f32; 4], u8, &'a str) {
     let Some(model) = model else {
-        return ([0.0; 4], 0);
+        return ([0.0; 4], 0, "");
     };
     let texture = model.texture(face);
-    (atlas.uv(texture), random_rotation(texture, x, y, z, face))
+    (
+        atlas.uv(texture),
+        random_rotation(texture, x, y, z, face),
+        texture,
+    )
 }
 
 /// Output of the mesher.
@@ -157,6 +184,9 @@ pub struct MeshData {
 /// `model_map` maps block path string → BlockModel.
 pub fn mesh_chunk(
     chunk: &Chunk,
+    world: &World,
+    biome_source: &BiomeSource,
+    noise_settings: &NoiseSettings,
     model_map: &HashMap<String, BlockModel>,
     atlas: &TextureAtlas,
 ) -> MeshData {
@@ -195,6 +225,11 @@ pub fn mesh_chunk(
                 let fx = chunk_origin_x + x as f32;
                 let fy = y as f32;
                 let fz = chunk_origin_z + z as f32;
+                let world_x = chunk.pos().0 * SX as i32 + x as i32;
+                let world_z = chunk.pos().1 * SZ as i32 + z as i32;
+                let biome_id =
+                    biome_source.sample_biome_id(world, noise_settings, world_x, world_z);
+                let biome = biome_id.path();
                 let top_height =
                     if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
                         LOWERED_WATER_HEIGHT
@@ -204,7 +239,7 @@ pub fn mesh_chunk(
 
                 // Right (+X)
                 if x + 1 >= SX || face_visible(block, &blocks[idx + 1]) {
-                    let (uv, rotation) = face_uv(model, atlas, Face::Right, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Right, x, y, z);
                     let q = quad(
                         0,
                         fx,
@@ -214,12 +249,13 @@ pub fn mesh_chunk(
                         top_height,
                         rotation,
                         face_ao(blocks, x, y, z, 0),
+                        biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Left (-X)
                 if x == 0 || face_visible(block, &blocks[idx - 1]) {
-                    let (uv, rotation) = face_uv(model, atlas, Face::Left, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Left, x, y, z);
                     let q = quad(
                         1,
                         fx,
@@ -229,12 +265,13 @@ pub fn mesh_chunk(
                         top_height,
                         rotation,
                         face_ao(blocks, x, y, z, 1),
+                        biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Top (+Y)
                 if y + 1 >= SY || face_visible(block, &blocks[idx + SLICE]) {
-                    let (uv, rotation) = face_uv(model, atlas, Face::Top, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Top, x, y, z);
                     let q = quad(
                         2,
                         fx,
@@ -244,12 +281,13 @@ pub fn mesh_chunk(
                         top_height,
                         rotation,
                         face_ao(blocks, x, y, z, 2),
+                        biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Bottom (-Y)
                 if y == 0 || face_visible(block, &blocks[idx - SLICE]) {
-                    let (uv, rotation) = face_uv(model, atlas, Face::Bottom, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Bottom, x, y, z);
                     let q = quad(
                         3,
                         fx,
@@ -259,12 +297,13 @@ pub fn mesh_chunk(
                         top_height,
                         rotation,
                         face_ao(blocks, x, y, z, 3),
+                        biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Front (+Z)
                 if z + 1 >= SZ || face_visible(block, &blocks[idx + SX]) {
-                    let (uv, rotation) = face_uv(model, atlas, Face::Front, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Front, x, y, z);
                     let q = quad(
                         4,
                         fx,
@@ -274,12 +313,13 @@ pub fn mesh_chunk(
                         top_height,
                         rotation,
                         face_ao(blocks, x, y, z, 4),
+                        biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Back (-Z)
                 if z == 0 || face_visible(block, &blocks[idx - SX]) {
-                    let (uv, rotation) = face_uv(model, atlas, Face::Back, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Back, x, y, z);
                     let q = quad(
                         5,
                         fx,
@@ -289,6 +329,7 @@ pub fn mesh_chunk(
                         top_height,
                         rotation,
                         face_ao(blocks, x, y, z, 5),
+                        biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
@@ -320,6 +361,7 @@ fn quad(
     top_height: f32,
     rotation: u8,
     ao: [f32; 4],
+    tint: [f32; 3],
 ) -> Quad {
     let [u0, v0, u1, v1] = uv;
     let off = |v: [f32; 3]| [v[0] + ox - 8.5, v[1] + oy, v[2] + oz - 8.5];
@@ -397,21 +439,25 @@ fn quad(
                 position: off(verts[0]),
                 uv: uvs[0],
                 ao: ao[0],
+                tint,
             },
             Vertex {
                 position: off(verts[1]),
                 uv: uvs[1],
                 ao: ao[1],
+                tint,
             },
             Vertex {
                 position: off(verts[2]),
                 uv: uvs[2],
                 ao: ao[2],
+                tint,
             },
             Vertex {
                 position: off(verts[3]),
                 uv: uvs[3],
                 ao: ao[3],
+                tint,
             },
         ],
     }

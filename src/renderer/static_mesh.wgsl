@@ -22,12 +22,14 @@ struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) ao: f32,
+    @location(3) tint: vec3<f32>,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
     @location(1) ao: f32,
+    @location(2) tint: vec3<f32>,
 };
 
 @vertex
@@ -36,6 +38,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.clip_position = camera.view_projection * vec4<f32>(input.position, 1.0);
     output.tex_coords = input.uv;
     output.ao = input.ao;
+    output.tint = input.tint;
     return output;
 }
 
@@ -43,5 +46,5 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(block_texture, texture_sampler, input.tex_coords);
     let color = tex_color * material.base_color;
-    return vec4<f32>(color.rgb * input.ao, color.a);
+    return vec4<f32>(color.rgb * input.tint * input.ao, color.a);
 }

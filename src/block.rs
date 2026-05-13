@@ -260,6 +260,24 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
             ),
         ),
         (
+            "coal_ore",
+            BlockDefinition::block(
+                "block.coal_ore",
+                true,
+                true,
+                false,
+                false,
+                3.0,
+                0,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.required_tool_tier = ToolTier::Wood;
+                    c
+                },
+                &[],
+            ),
+        ),
+        (
             "grass_block",
             BlockDefinition::block(
                 "block.grass_block",

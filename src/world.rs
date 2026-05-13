@@ -206,9 +206,23 @@ impl World {
         self.chunks.entry(pos).or_insert_with(|| Chunk::new(pos));
     }
 
+    /// Unloads a chunk and drops any pending dirty marker for it.
+    pub fn unload_chunk(&mut self, pos: ChunkPos) -> bool {
+        let removed = self.chunks.remove(&pos).is_some();
+        if removed {
+            self.dirty_chunks.retain(|dirty| *dirty != pos);
+        }
+        removed
+    }
+
     /// Returns an iterator over all loaded chunks.
     pub fn chunks(&self) -> impl Iterator<Item = &Chunk> {
         self.chunks.values()
+    }
+
+    /// Returns the positions of currently loaded chunks.
+    pub fn chunk_positions(&self) -> Vec<ChunkPos> {
+        self.chunks.keys().copied().collect()
     }
 
     /// Returns a mutable iterator over all loaded chunks.
@@ -303,6 +317,18 @@ mod tests {
         let mut w = World::new();
         w.set_block(BlockPos(0, 0, 0), BlockId("stone".to_string()));
         assert_eq!(w.drain_dirty().len(), 1);
+        assert!(w.drain_dirty().is_empty());
+    }
+
+    #[test]
+    fn world_unloads_chunks_and_dirty_markers() {
+        let mut w = World::new();
+        let pos = ChunkPos(1, -1);
+        w.set_block(BlockPos(16, 0, -1), BlockId("stone".to_string()));
+
+        assert!(w.is_chunk_loaded(pos));
+        assert!(w.unload_chunk(pos));
+        assert!(!w.is_chunk_loaded(pos));
         assert!(w.drain_dirty().is_empty());
     }
 

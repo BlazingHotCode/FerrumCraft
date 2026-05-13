@@ -50,6 +50,9 @@ const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
 const DEMO_WORLD_SEED: u64 = 12_345;
+const DEMO_SPAWN_CHUNK_RADIUS: i32 = 4;
+const CHUNKS_GENERATED_PER_TICK: usize = 1;
+const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const WORLD_RENDER_OFFSET: f32 = 8.5;
 
 /// Top-level application state owned by the winit event loop.
@@ -61,7 +64,11 @@ struct App {
     renderer: Option<renderer::Renderer>,
     camera: Option<FirstPersonCamera>,
     world: world::World,
+    biomes: crate::registry::Registry<worldgen::Biome>,
+    biome_source: worldgen::BiomeSource,
+    noise_settings: worldgen::NoiseSettings,
     worldgen_feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
+    structure_sets: crate::registry::Registry<worldgen::StructureSet>,
     font: Option<Font>,
     block_models: Option<crate::registry::Registry<model::BlockModel>>,
     input: InputState,
@@ -269,14 +276,80 @@ impl App {
     fn fixed_update(&mut self, _dt: Duration) {
         // Match Minecraft's 20 ticks-per-second simulation rate while rendering
         // stays independent and can run at a higher frame rate.
+        let mut camera_position = None;
         if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
             renderer.set_view_projection(camera.view_projection());
-            self.debug_overlay.set_player_position(camera.position());
+            let position = camera.position();
+            camera_position = Some(position);
+            self.debug_overlay.set_player_position(position);
             self.debug_overlay.set_facing(camera.facing_name());
             self.debug_overlay
                 .set_render_distance(self.render_distance_chunks);
         }
+        if let Some(position) = camera_position {
+            self.update_debug_biome(position);
+            let center_chunk = camera_chunk_pos(position);
+            let generated = self.generate_missing_chunks_around(center_chunk);
+            let unloaded = self.unload_far_chunks(center_chunk);
+            if generated > 0 || unloaded > 0 {
+                self.rebuild_chunk_meshes(true);
+                return;
+            }
+        }
         self.rebuild_chunk_meshes(false);
+    }
+
+    fn generate_missing_chunks_around(&mut self, center_chunk: world::ChunkPos) -> usize {
+        let mut generated = 0;
+        let radius = self.render_distance_chunks.max(DEMO_SPAWN_CHUNK_RADIUS);
+
+        'outer: for distance in 0..=radius {
+            for chunk_x in center_chunk.0 - distance..=center_chunk.0 + distance {
+                for chunk_z in center_chunk.1 - distance..=center_chunk.1 + distance {
+                    if (chunk_x - center_chunk.0)
+                        .abs()
+                        .max((chunk_z - center_chunk.1).abs())
+                        != distance
+                    {
+                        continue;
+                    }
+
+                    let chunk_pos = world::ChunkPos(chunk_x, chunk_z);
+                    if self.world.is_chunk_loaded(chunk_pos) {
+                        continue;
+                    }
+
+                    generate_worldgen_chunk(
+                        &mut self.world,
+                        &self.worldgen_feature_types,
+                        &self.structure_sets,
+                        &self.noise_settings,
+                        &self.biome_source,
+                        chunk_pos,
+                    );
+                    generated += 1;
+                    if generated >= CHUNKS_GENERATED_PER_TICK {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        generated
+    }
+
+    fn unload_far_chunks(&mut self, center_chunk: world::ChunkPos) -> usize {
+        let unload_distance = self.render_distance_chunks + UNLOAD_MARGIN_CHUNKS;
+        let mut unloaded = 0;
+        for chunk_pos in self.world.chunk_positions() {
+            let distance = (chunk_pos.0 - center_chunk.0)
+                .abs()
+                .max((chunk_pos.1 - center_chunk.1).abs());
+            if distance > unload_distance && self.world.unload_chunk(chunk_pos) {
+                unloaded += 1;
+            }
+        }
+        unloaded
     }
 
     fn update_free_fly_movement(&mut self, dt: Duration) {
@@ -293,10 +366,12 @@ impl App {
             camera.translate_world(self.free_fly_velocity * dt.as_secs_f32());
         }
 
+        let position = camera.position();
         if let Some(renderer) = &mut self.renderer {
             renderer.set_view_projection(camera.view_projection());
         }
-        self.debug_overlay.set_player_position(camera.position());
+        self.debug_overlay.set_player_position(position);
+        self.update_debug_biome(position);
     }
 
     fn set_pointer_locked(&mut self, locked: bool) {
@@ -341,10 +416,36 @@ impl App {
             renderer,
             block_models,
             &self.world,
+            &self.biome_source,
+            &self.noise_settings,
             center_chunk,
             self.render_distance_chunks,
         );
         self.mesh_center_chunk = center_chunk;
+    }
+
+    fn update_debug_biome(&mut self, position: Vec3) {
+        let block_pos = camera_block_pos(position);
+        let biome_name = self
+            .biome_source
+            .sample_biome(
+                &self.world,
+                &self.noise_settings,
+                &self.biomes,
+                block_pos.0,
+                block_pos.2,
+            )
+            .map(|(id, biome)| {
+                format!(
+                    "{} ({}, T {:.1}, H {:.1})",
+                    biome.name(),
+                    id,
+                    biome.temperature(),
+                    biome.humidity()
+                )
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+        self.debug_overlay.set_biome(biome_name);
     }
 }
 
@@ -353,6 +454,8 @@ fn build_chunk_meshes(
     renderer: &mut renderer::Renderer,
     block_models: &crate::registry::Registry<model::BlockModel>,
     world: &world::World,
+    biome_source: &worldgen::BiomeSource,
+    noise_settings: &worldgen::NoiseSettings,
     center_chunk: world::ChunkPos,
     render_distance_chunks: i32,
 ) {
@@ -377,7 +480,14 @@ fn build_chunk_meshes(
             continue;
         }
 
-        let data = mesher::mesh_chunk(chunk, &model_map, &renderer.atlas);
+        let data = mesher::mesh_chunk(
+            chunk,
+            world,
+            biome_source,
+            noise_settings,
+            &model_map,
+            &renderer.atlas,
+        );
         if data.vertices.is_empty() {
             continue;
         }
@@ -398,36 +508,111 @@ fn build_chunk_meshes(
 }
 
 fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
+    let block_pos = camera_block_pos(position);
     world::ChunkPos(
-        ((position.x + WORLD_RENDER_OFFSET).floor() as i32).div_euclid(world::CHUNK_SIZE_X as i32),
-        ((position.z + WORLD_RENDER_OFFSET).floor() as i32).div_euclid(world::CHUNK_SIZE_Z as i32),
+        block_pos.0.div_euclid(world::CHUNK_SIZE_X as i32),
+        block_pos.2.div_euclid(world::CHUNK_SIZE_Z as i32),
     )
+}
+
+fn camera_block_pos(position: Vec3) -> world::BlockPos {
+    world::BlockPos(
+        (position.x + WORLD_RENDER_OFFSET).floor() as i32,
+        position.y.floor() as i32,
+        (position.z + WORLD_RENDER_OFFSET).floor() as i32,
+    )
+}
+
+fn generate_worldgen_chunk(
+    world: &mut world::World,
+    feature_types: &crate::registry::Registry<worldgen::WorldgenFeatureType>,
+    structure_sets: &crate::registry::Registry<worldgen::StructureSet>,
+    noise_settings: &worldgen::NoiseSettings,
+    biome_source: &worldgen::BiomeSource,
+    chunk_pos: world::ChunkPos,
+) {
+    let id = |s: &str| block::BlockId(s.to_string());
+
+    worldgen::populate_chunk_noise(world, chunk_pos, noise_settings, id("stone"));
+    worldgen::apply_surface_rules(world, chunk_pos, noise_settings, biome_source);
+    worldgen::apply_carvers(world, chunk_pos, noise_settings);
+    worldgen::apply_sea_level_water(world, chunk_pos, noise_settings, id("water"));
+
+    let coal_ore = worldgen::PlacedFeature {
+        configured: worldgen::ConfiguredFeature {
+            feature_type: id::NamespacedId::ferrumcraft("ore").expect("valid feature type ID"),
+            config: worldgen::FeatureConfig::Ore {
+                ore: id("coal_ore"),
+                replaceable: vec![id("stone")],
+                size: 6,
+            },
+        },
+        placement: worldgen::PlacementConfig {
+            attempts_per_chunk: 2,
+            chance: 3,
+            salt: 5_005,
+            height: worldgen::PlacementHeight::Range { min: 1, max: 6 },
+            biome_filter: Vec::new(),
+        },
+    };
+    worldgen::place_placed_feature_in_chunk(
+        feature_types,
+        &coal_ore,
+        world,
+        noise_settings,
+        biome_source,
+        chunk_pos,
+    );
+
+    let forest_tree = worldgen::PlacedFeature {
+        configured: worldgen::ConfiguredFeature {
+            feature_type: id::NamespacedId::ferrumcraft("tree").expect("valid feature type ID"),
+            config: worldgen::FeatureConfig::SimpleTree {
+                log: id("oak_log"),
+                leaves: id("oak_leaves"),
+                trunk_height: 3,
+            },
+        },
+        placement: worldgen::PlacementConfig {
+            attempts_per_chunk: 1,
+            chance: 6,
+            salt: 4_004,
+            height: worldgen::PlacementHeight::Surface,
+            biome_filter: vec![id::NamespacedId::ferrumcraft("forest").expect("valid biome ID")],
+        },
+    };
+    worldgen::place_placed_feature_in_chunk(
+        feature_types,
+        &forest_tree,
+        world,
+        noise_settings,
+        biome_source,
+        chunk_pos,
+    );
+
+    worldgen::place_structures_in_chunk(structure_sets, world, noise_settings, chunk_pos);
 }
 
 fn create_demo_world(
     feature_types: &crate::registry::Registry<worldgen::WorldgenFeatureType>,
+    structure_sets: &crate::registry::Registry<worldgen::StructureSet>,
+    noise_settings: &worldgen::NoiseSettings,
+    biome_source: &worldgen::BiomeSource,
 ) -> world::World {
     let mut world = world::World::with_seed(DEMO_WORLD_SEED);
-    let origin = world::ChunkPos(0, 0);
-    world.load_chunk(origin);
 
     let id = |s: &str| block::BlockId(s.to_string());
-    let noise_settings = worldgen::NoiseSettings::demo();
+    let spawn_chunks = worldgen::spawn_area_chunks(world::ChunkPos(0, 0), DEMO_SPAWN_CHUNK_RADIUS);
 
-    for x in 0..world::CHUNK_SIZE_X {
-        for z in 0..world::CHUNK_SIZE_Z {
-            world.set_block(world::BlockPos(x as i32, 0, z as i32), id("dirt"));
-            world.set_block(world::BlockPos(x as i32, 1, z as i32), id("grass_block"));
-        }
-    }
-    for x in 32..48 {
-        for z in 0..16 {
-            let sample = noise_settings.sample(&world, x, z);
-            for y in 0..sample.height {
-                world.set_block(world::BlockPos(x, y, z), id("dirt"));
-            }
-            world.set_block(world::BlockPos(x, sample.height, z), id("grass_block"));
-        }
+    for &chunk_pos in &spawn_chunks {
+        generate_worldgen_chunk(
+            &mut world,
+            feature_types,
+            structure_sets,
+            noise_settings,
+            biome_source,
+            chunk_pos,
+        );
     }
     let stone_column = worldgen::ConfiguredFeature {
         feature_type: id::NamespacedId::ferrumcraft("block_column").expect("valid feature type ID"),
@@ -541,9 +726,9 @@ fn place_ao_test_structure(world: &mut world::World, origin: world::BlockPos) {
 
 fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
     let block_pos = world::BlockPos(
-        (position.x + WORLD_RENDER_OFFSET).floor() as i32,
-        position.y.floor() as i32,
-        (position.z + WORLD_RENDER_OFFSET).floor() as i32,
+        camera_block_pos(position).0,
+        camera_block_pos(position).1,
+        camera_block_pos(position).2,
     );
     if world.get_block(block_pos).0 != "water" {
         return None;
@@ -605,10 +790,20 @@ fn main() {
 
     let block_registry = block::register_core_blocks();
     log::info!(target: "blocks", "Registered {} core block types", block_registry.len());
+    let biomes = worldgen::register_core_biomes();
+    log::info!(target: "worldgen", "Registered {} biomes", biomes.len());
+    let biome_source = worldgen::BiomeSource::demo();
+    log::info!(target: "worldgen", "Biome source: {:?}", biome_source);
+    let noise_settings = worldgen::NoiseSettings::demo();
     let worldgen_feature_types = worldgen::register_core_feature_types();
     log::info!(target: "worldgen", "Registered {} worldgen feature types", worldgen_feature_types.len());
     for (id, feature_type) in worldgen_feature_types.iter() {
         log::debug!(target: "worldgen", "Feature type {id}: {}", feature_type.name());
+    }
+    let structure_sets = worldgen::register_core_structure_sets();
+    log::info!(target: "worldgen", "Registered {} structure sets", structure_sets.len());
+    for (id, structure_set) in structure_sets.iter() {
+        log::debug!(target: "worldgen", "Structure set {id}: {}", structure_set.name());
     }
 
     // Log block component summary.
@@ -677,9 +872,14 @@ fn main() {
     };
 
     // Create a demo world and place some blocks.
-    let mut world = create_demo_world(&worldgen_feature_types);
+    let mut world = create_demo_world(
+        &worldgen_feature_types,
+        &structure_sets,
+        &noise_settings,
+        &biome_source,
+    );
     log::info!(target: "world", "Demo world seed: {}", world.seed());
-    log::info!(target: "worldgen", "Demo noise settings: {:?}", worldgen::NoiseSettings::demo());
+    log::info!(target: "worldgen", "Demo noise settings: {:?}", noise_settings);
     if let Some(def) = block_registry
         .iter()
         .find(|(id, _)| id.path() == "oak_log")
@@ -711,7 +911,11 @@ fn main() {
         renderer: None,
         camera: None,
         world,
+        biomes,
+        biome_source,
+        noise_settings,
         worldgen_feature_types,
+        structure_sets,
         font: Some(font),
         block_models: Some(block_models),
         input: InputState::default(),

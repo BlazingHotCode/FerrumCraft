@@ -94,11 +94,6 @@ impl TextureAtlas {
                 apply_grass_side_overlay(resources, namespace, &mut frames);
             } else if *path == "block/water_still" {
                 apply_water_overlay(resources, namespace, &mut frames);
-            } else {
-                // Apply biome colour tint for grass, leaves, and water.
-                for pixels in &mut frames {
-                    apply_biome_tint(path, pixels);
-                }
             }
 
             let col = i as u32 % ATLAS_COLS;
@@ -438,7 +433,6 @@ fn load_texture_meta(resources: &ResourceManager, namespace: &str, path: &str) {
 // ── Procedural texture generation (fallback) ──────────────────────────────
 fn apply_water_overlay(resources: &ResourceManager, namespace: &str, water_frames: &mut [Vec<u8>]) {
     for frame in water_frames.iter_mut() {
-        apply_biome_tint("block/water_still", frame);
         set_alpha(frame, WATER_ALPHA);
     }
 
@@ -456,7 +450,6 @@ fn apply_water_overlay(resources: &ResourceManager, namespace: &str, water_frame
     };
 
     let overlay = &mut overlay_frames[0];
-    apply_biome_tint("block/water_still", overlay);
     clamp_alpha(overlay, WATER_ALPHA);
 
     for frame in water_frames {
@@ -484,7 +477,6 @@ fn apply_grass_side_overlay(
     };
 
     let overlay = &mut overlay_frames[0];
-    apply_biome_tint("block/grass_block_side_overlay", overlay);
     for base in base_frames {
         alpha_composite(base, overlay);
     }
@@ -521,27 +513,6 @@ fn clamp_alpha(rgba: &mut [u8], alpha: u8) {
         let idx = i * 4 + 3;
         rgba[idx] = rgba[idx].min(alpha);
     }
-}
-
-fn apply_biome_tint(path: &str, rgba: &mut [u8]) {
-    let tint = match path {
-        "block/grass_block_top" | "block/grass_block_side_overlay" => Some([0x91, 0xbd, 0x59]),
-        "block/oak_leaves" => Some([0x59, 0x9b, 0x2f]),
-        "block/water_still" => Some([0x3f, 0x76, 0xe4]),
-        _ => None,
-    };
-    if let Some([tr, tg, tb]) = tint {
-        for i in 0..(TEX_SIZE * TEX_SIZE) as usize {
-            let idx = i * 4;
-            rgba[idx] = multiply_tint(rgba[idx], tr);
-            rgba[idx + 1] = multiply_tint(rgba[idx + 1], tg);
-            rgba[idx + 2] = multiply_tint(rgba[idx + 2], tb);
-        }
-    }
-}
-
-fn multiply_tint(channel: u8, tint: u8) -> u8 {
-    ((channel as u16 * tint as u16) / 255) as u8
 }
 
 fn procedural_texture(path: &str) -> Option<Vec<u8>> {

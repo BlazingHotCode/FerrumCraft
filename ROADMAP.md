@@ -69,18 +69,18 @@ refined as adjacent systems mature.
 - [x] Deterministic world seed
 - [x] Worldgen feature registry with namespaced string IDs
 - [x] Noise settings for terrain shape (height, continentalness, erosion, peaks/valleys)
-- [ ] Biome source and biome map generation from seed/noise
-- [ ] Chunk noise population: stone terrain from height and density fields
-- [ ] Surface rules for biome top/filler blocks (grass, dirt, sand, stone)
-- [ ] Aquifers/sea level water filling for oceans, rivers, and lakes
-- [ ] Carvers for caves and ravines
-- [ ] Placed/configured feature pipeline for vegetation, ores, disks, and lakes
-- [ ] Ore placement using configured features, height ranges, and biome filters
-- [ ] Tree placement using configured features and biome filters
-- [ ] Structure set registry and simple structure placement hooks
-- [ ] Spawn area chunk generation around player
-- [ ] Async/incremental chunk loading around player
-- [ ] Chunk unload distance
+- [x] Biome source and biome map generation from seed/noise
+- [x] Chunk noise population: stone terrain from height and density fields
+- [x] Surface rules for biome top/filler blocks (grass, dirt, sand, stone)
+- [x] Aquifers/sea level water filling for oceans, rivers, and lakes
+- [x] Carvers for caves and ravines
+- [x] Placed/configured feature pipeline for vegetation, ores, disks, and lakes
+- [x] Ore placement using configured features, height ranges, and biome filters
+- [x] Tree placement using configured features and biome filters
+- [x] Structure set registry and simple structure placement hooks
+- [x] Spawn area chunk generation around player
+- [x] Async/incremental chunk loading around player
+- [x] Chunk unload distance
 
 ## Phase 7 - First-Person Player
 - [ ] Grounded WASD movement relative to camera yaw

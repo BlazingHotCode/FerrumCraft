@@ -22,6 +22,7 @@ pub struct DebugOverlay {
     culled_meshes: usize,
     render_distance_chunks: i32,
     world_seed: u64,
+    biome: String,
 }
 
 impl DebugOverlay {
@@ -69,11 +70,16 @@ impl DebugOverlay {
         self.world_seed = seed;
     }
 
+    /// Updates the current biome diagnostic shown by F3.
+    pub fn set_biome(&mut self, biome: impl Into<String>) {
+        self.biome = biome.into();
+    }
+
     /// Text rendered by the overlay when visible.
     pub fn text(&self) -> Option<String> {
         self.visible.then(|| {
             format!(
-                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nSEED: {}\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nFACING: {}\nRENDER DISTANCE: {} CHUNKS\nMESHES: {} VISIBLE, {} CULLED",
+                "F3 DEBUG\nFPS: {}\nFRAME: {:.2} MS\nSEED: {}\nPOSITION: {:.2} {:.2} {:.2}\nCHUNK: {} {}\nBIOME: {}\nFACING: {}\nRENDER DISTANCE: {} CHUNKS\nMESHES: {} VISIBLE, {} CULLED",
                 self.fps,
                 self.frame_ms,
                 self.world_seed,
@@ -82,6 +88,7 @@ impl DebugOverlay {
                 self.player_position.z,
                 chunk_coord(self.player_position.x),
                 chunk_coord(self.player_position.z),
+                self.biome,
                 self.facing,
                 self.render_distance_chunks,
                 self.visible_meshes,
