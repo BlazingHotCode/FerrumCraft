@@ -223,6 +223,21 @@ impl World {
         }
     }
 
+    /// Inserts a generated chunk as loaded world data.
+    pub fn insert_chunk(&mut self, mut chunk: Chunk) {
+        let pos = chunk.pos();
+        chunk.clear_dirty();
+        self.cached_chunks.remove(&pos);
+        self.chunks.insert(pos, chunk);
+        self.dirty_chunks.retain(|dirty| *dirty != pos);
+    }
+
+    /// Removes a loaded chunk and returns it.
+    pub fn take_chunk(&mut self, pos: ChunkPos) -> Option<Chunk> {
+        self.dirty_chunks.retain(|dirty| *dirty != pos);
+        self.chunks.remove(&pos)
+    }
+
     /// Unloads a chunk into the in-memory cache and drops any pending dirty marker for it.
     pub fn unload_chunk(&mut self, pos: ChunkPos) -> bool {
         if let Some(chunk) = self.chunks.remove(&pos) {

@@ -100,4 +100,9 @@ impl Scene {
         self.opaque_meshes.remove(&pos);
         self.transparent_meshes.remove(&pos);
     }
+
+    /// Returns whether either render layer has a mesh for this chunk.
+    pub fn has_chunk_mesh(&self, pos: ChunkPos) -> bool {
+        self.opaque_meshes.contains_key(&pos) || self.transparent_meshes.contains_key(&pos)
+    }
 }

@@ -105,10 +105,22 @@ impl RenderPipelines {
             push_constant_ranges: &[],
         });
 
-        let opaque_mesh =
-            create_static_mesh_pipeline(device, color_format, &shader, &pipeline_layout, true);
-        let transparent_mesh =
-            create_static_mesh_pipeline(device, color_format, &shader, &pipeline_layout, false);
+        let opaque_mesh = create_static_mesh_pipeline(
+            device,
+            color_format,
+            &shader,
+            &pipeline_layout,
+            true,
+            Some(wgpu::Face::Back),
+        );
+        let transparent_mesh = create_static_mesh_pipeline(
+            device,
+            color_format,
+            &shader,
+            &pipeline_layout,
+            false,
+            None,
+        );
 
         Self {
             opaque_mesh,
@@ -255,6 +267,7 @@ fn create_static_mesh_pipeline(
     shader: &wgpu::ShaderModule,
     pipeline_layout: &wgpu::PipelineLayout,
     depth_write_enabled: bool,
+    cull_mode: Option<wgpu::Face>,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("Static mesh pipeline"),
@@ -277,7 +290,7 @@ fn create_static_mesh_pipeline(
         }),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
-            cull_mode: None,
+            cull_mode,
             ..Default::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {

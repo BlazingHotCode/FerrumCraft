@@ -151,6 +151,11 @@ impl Renderer {
         self.scene.remove_chunk_mesh(pos);
     }
 
+    /// Returns whether this chunk currently has renderable mesh data.
+    pub fn has_chunk_mesh(&self, pos: crate::world::ChunkPos) -> bool {
+        self.scene.has_chunk_mesh(pos)
+    }
+
     /// Encodes and presents one frame.
     pub fn render(
         &mut self,

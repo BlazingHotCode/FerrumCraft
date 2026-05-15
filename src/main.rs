@@ -25,6 +25,9 @@ mod window;
 mod world;
 mod worldgen;
 
+use std::collections::HashSet;
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use camera::FirstPersonCamera;
@@ -48,11 +51,11 @@ const FREE_FLY_SPEED: f32 = 6.0;
 const FREE_FLY_ACCELERATION: f32 = 18.0;
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
-const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
+const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
 const DEMO_WORLD_SEED: u64 = 12_345;
-const DEMO_SPAWN_CHUNK_RADIUS: i32 = 4;
-const RUNTIME_CHUNK_LOAD_RADIUS: i32 = 4;
+const DEMO_SPAWN_CHUNK_RADIUS: i32 = 1;
 const CHUNKS_GENERATED_PER_TICK: usize = 1;
+const GENERATED_CHUNKS_INTEGRATED_PER_TICK: usize = 1;
 const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const WORLD_RENDER_OFFSET: f32 = 8.5;
 
@@ -70,6 +73,9 @@ struct App {
     noise_settings: worldgen::NoiseSettings,
     worldgen_feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
     structure_sets: crate::registry::Registry<worldgen::StructureSet>,
+    chunk_generation_tx: mpsc::Sender<world::ChunkPos>,
+    generated_chunk_rx: mpsc::Receiver<GeneratedChunk>,
+    pending_chunk_generations: HashSet<world::ChunkPos>,
     font: Option<Font>,
     block_models: Option<crate::registry::Registry<model::BlockModel>>,
     input: InputState,
@@ -81,6 +87,11 @@ struct App {
     free_fly_velocity: Vec3,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
+}
+
+struct GeneratedChunk {
+    pos: world::ChunkPos,
+    chunk: world::Chunk,
 }
 
 impl ApplicationHandler for App {
@@ -293,9 +304,11 @@ impl App {
         if let Some(position) = camera_position {
             self.update_debug_biome(position);
             let center_chunk = camera_chunk_pos(position);
+            let integrated = self.integrate_generated_chunks();
             let generated = self.generate_missing_chunks_around(center_chunk);
             let unloaded = self.unload_far_chunks(center_chunk);
-            if generated > 0 || unloaded > 0 {
+            self.remove_chunk_meshes_outside_render_distance(center_chunk);
+            if integrated > 0 || generated > 0 || unloaded > 0 {
                 return;
             }
         }
@@ -305,7 +318,7 @@ impl App {
     }
 
     fn generate_missing_chunks_around(&mut self, center_chunk: world::ChunkPos) -> usize {
-        let mut generated = 0;
+        let mut requested = 0;
         let radius = self.render_distance_chunks.max(0);
 
         'outer: for distance in 0..=radius {
@@ -321,31 +334,61 @@ impl App {
 
                     let chunk_pos = world::ChunkPos(chunk_x, chunk_z);
                     if self.world.is_chunk_loaded(chunk_pos) {
+                        let needs_mesh = self
+                            .renderer
+                            .as_ref()
+                            .is_some_and(|renderer| !renderer.has_chunk_mesh(chunk_pos));
+                        if needs_mesh {
+                            self.rebuild_chunk_meshes_near(chunk_pos);
+                            requested += 1;
+                            if requested >= CHUNKS_GENERATED_PER_TICK {
+                                break 'outer;
+                            }
+                        }
+                        continue;
+                    }
+                    if self.pending_chunk_generations.contains(&chunk_pos) {
                         continue;
                     }
 
                     if self.world.is_chunk_cached(chunk_pos) {
                         self.world.load_chunk(chunk_pos);
+                        self.rebuild_chunk_meshes_near(chunk_pos);
                     } else {
-                        generate_worldgen_chunk(
-                            &mut self.world,
-                            &self.worldgen_feature_types,
-                            &self.structure_sets,
-                            &self.noise_settings,
-                            &self.biome_source,
-                            chunk_pos,
-                        );
+                        if self.chunk_generation_tx.send(chunk_pos).is_err() {
+                            continue;
+                        }
+                        self.pending_chunk_generations.insert(chunk_pos);
                     }
-                    self.rebuild_chunk_meshes_near(chunk_pos);
-                    generated += 1;
-                    if generated >= CHUNKS_GENERATED_PER_TICK {
+                    requested += 1;
+                    if requested >= CHUNKS_GENERATED_PER_TICK {
                         break 'outer;
                     }
                 }
             }
         }
 
-        generated
+        requested
+    }
+
+    fn integrate_generated_chunks(&mut self) -> usize {
+        let mut integrated = 0;
+        while integrated < GENERATED_CHUNKS_INTEGRATED_PER_TICK {
+            let Ok(generated) = self.generated_chunk_rx.try_recv() else {
+                break;
+            };
+
+            self.pending_chunk_generations.remove(&generated.pos);
+            if self.world.is_chunk_loaded(generated.pos) {
+                continue;
+            }
+
+            self.world.insert_chunk(generated.chunk);
+            self.rebuild_chunk_meshes_near(generated.pos);
+            integrated += 1;
+        }
+
+        integrated
     }
 
     fn unload_far_chunks(&mut self, center_chunk: world::ChunkPos) -> usize {
@@ -681,6 +724,51 @@ fn camera_block_pos(position: Vec3) -> world::BlockPos {
         position.y.floor() as i32,
         (position.z + WORLD_RENDER_OFFSET).floor() as i32,
     )
+}
+
+fn start_chunk_generation_worker(
+    seed: u64,
+    feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
+    structure_sets: crate::registry::Registry<worldgen::StructureSet>,
+    noise_settings: worldgen::NoiseSettings,
+    biome_source: worldgen::BiomeSource,
+) -> (
+    mpsc::Sender<world::ChunkPos>,
+    mpsc::Receiver<GeneratedChunk>,
+) {
+    let (request_tx, request_rx) = mpsc::channel::<world::ChunkPos>();
+    let (result_tx, result_rx) = mpsc::channel::<GeneratedChunk>();
+
+    thread::Builder::new()
+        .name("chunk-generation".to_string())
+        .spawn(move || {
+            while let Ok(chunk_pos) = request_rx.recv() {
+                let mut generated_world = world::World::with_seed(seed);
+                generate_worldgen_chunk(
+                    &mut generated_world,
+                    &feature_types,
+                    &structure_sets,
+                    &noise_settings,
+                    &biome_source,
+                    chunk_pos,
+                );
+
+                if let Some(chunk) = generated_world.take_chunk(chunk_pos) {
+                    if result_tx
+                        .send(GeneratedChunk {
+                            pos: chunk_pos,
+                            chunk,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        })
+        .expect("failed to start chunk generation worker");
+
+    (request_tx, result_rx)
 }
 
 fn generate_worldgen_chunk(
@@ -1064,6 +1152,14 @@ fn main() {
         world.get_block(world::BlockPos(0, 0, 0)),
     );
 
+    let (chunk_generation_tx, generated_chunk_rx) = start_chunk_generation_worker(
+        world.seed(),
+        worldgen_feature_types.clone(),
+        structure_sets.clone(),
+        noise_settings,
+        biome_source,
+    );
+
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
@@ -1076,6 +1172,9 @@ fn main() {
         noise_settings,
         worldgen_feature_types,
         structure_sets,
+        chunk_generation_tx,
+        generated_chunk_rx,
+        pending_chunk_generations: HashSet::new(),
         font: Some(font),
         block_models: Some(block_models),
         input: InputState::default(),
