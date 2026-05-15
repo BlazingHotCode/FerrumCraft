@@ -403,7 +403,14 @@ impl App {
         self.render_distance_chunks = next;
         self.debug_overlay.set_render_distance(next);
 
-        self.rebuild_chunk_meshes(true);
+        if let Some(center_chunk) = self
+            .camera
+            .as_ref()
+            .map(|camera| camera_chunk_pos(camera.position()))
+        {
+            self.unload_far_chunks(center_chunk);
+            self.remove_chunk_meshes_outside_render_distance(center_chunk);
+        }
 
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -459,6 +466,21 @@ impl App {
                 &self.noise_settings,
                 pos,
             );
+        }
+    }
+
+    fn remove_chunk_meshes_outside_render_distance(&mut self, center_chunk: world::ChunkPos) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+
+        for chunk_pos in self.world.chunk_positions() {
+            let distance = (chunk_pos.0 - center_chunk.0)
+                .abs()
+                .max((chunk_pos.1 - center_chunk.1).abs());
+            if distance > self.render_distance_chunks {
+                renderer.remove_chunk_mesh(chunk_pos);
+            }
         }
     }
 

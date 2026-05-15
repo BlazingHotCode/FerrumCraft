@@ -225,6 +225,21 @@ pub fn mesh_chunk(
     let mut transparent_verts = Vec::new();
     let mut transparent_inds = Vec::new();
     let mut transparent_off: u16 = 0;
+    let chunk_block_x = chunk.pos().0 * SX as i32;
+    let chunk_block_z = chunk.pos().1 * SZ as i32;
+    let biome_cache = std::array::from_fn::<_, { SX * SZ }, _>(|i| {
+        let x = i % SX;
+        let z = i / SX;
+        biome_source
+            .sample_biome_id(
+                world,
+                noise_settings,
+                chunk_block_x + x as i32,
+                chunk_block_z + z as i32,
+            )
+            .path()
+            .to_string()
+    });
 
     for y in 0..SY {
         let base_y = y * SLICE;
@@ -251,12 +266,10 @@ pub fn mesh_chunk(
                 let fx = chunk_origin_x + x as f32;
                 let fy = y as f32;
                 let fz = chunk_origin_z + z as f32;
-                let world_x = chunk.pos().0 * SX as i32 + x as i32;
+                let world_x = chunk_block_x + x as i32;
                 let world_y = y as i32;
-                let world_z = chunk.pos().1 * SZ as i32 + z as i32;
-                let biome_id =
-                    biome_source.sample_biome_id(world, noise_settings, world_x, world_z);
-                let biome = biome_id.path();
+                let world_z = chunk_block_z + z as i32;
+                let biome = biome_cache[z * SX + x].as_str();
                 let top_height =
                     if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
                         LOWERED_WATER_HEIGHT
