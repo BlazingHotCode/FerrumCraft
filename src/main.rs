@@ -306,10 +306,7 @@ impl App {
 
     fn generate_missing_chunks_around(&mut self, center_chunk: world::ChunkPos) -> usize {
         let mut generated = 0;
-        let radius = self
-            .render_distance_chunks
-            .min(RUNTIME_CHUNK_LOAD_RADIUS)
-            .max(0);
+        let radius = self.render_distance_chunks.max(0);
 
         'outer: for distance in 0..=radius {
             for chunk_x in center_chunk.0 - distance..=center_chunk.0 + distance {
@@ -394,6 +391,7 @@ impl App {
     }
 
     fn adjust_render_distance(&mut self, delta: i32) {
+        let previous = self.render_distance_chunks;
         let next = (self.render_distance_chunks + delta)
             .clamp(MIN_RENDER_DISTANCE_CHUNKS, MAX_RENDER_DISTANCE_CHUNKS);
         if next == self.render_distance_chunks {
@@ -410,6 +408,9 @@ impl App {
         {
             self.unload_far_chunks(center_chunk);
             self.remove_chunk_meshes_outside_render_distance(center_chunk);
+            if next > previous {
+                self.rebuild_loaded_chunk_meshes_in_range(center_chunk, previous + 1, next);
+            }
         }
 
         if let Some(window) = &self.window {
@@ -481,6 +482,36 @@ impl App {
             if distance > self.render_distance_chunks {
                 renderer.remove_chunk_mesh(chunk_pos);
             }
+        }
+    }
+
+    fn rebuild_loaded_chunk_meshes_in_range(
+        &mut self,
+        center_chunk: world::ChunkPos,
+        min_distance: i32,
+        max_distance: i32,
+    ) {
+        let (Some(renderer), Some(block_models)) = (&mut self.renderer, self.block_models.as_ref())
+        else {
+            return;
+        };
+
+        for chunk_pos in self.world.chunk_positions() {
+            let distance = (chunk_pos.0 - center_chunk.0)
+                .abs()
+                .max((chunk_pos.1 - center_chunk.1).abs());
+            if distance < min_distance || distance > max_distance {
+                continue;
+            }
+
+            rebuild_one_chunk_mesh(
+                renderer,
+                block_models,
+                &self.world,
+                &self.biome_source,
+                &self.noise_settings,
+                chunk_pos,
+            );
         }
     }
 
