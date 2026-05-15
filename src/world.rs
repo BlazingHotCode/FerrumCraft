@@ -220,6 +220,11 @@ impl World {
         self.chunks.values()
     }
 
+    /// Returns a loaded chunk by position.
+    pub fn chunk(&self, pos: ChunkPos) -> Option<&Chunk> {
+        self.chunks.get(&pos)
+    }
+
     /// Returns the positions of currently loaded chunks.
     pub fn chunk_positions(&self) -> Vec<ChunkPos> {
         self.chunks.keys().copied().collect()

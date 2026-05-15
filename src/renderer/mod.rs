@@ -22,6 +22,7 @@ use glam::Mat4;
 use overlay::OverlayRenderer;
 use pipeline::{RenderPipelines, depth_format};
 use scene::Scene;
+use std::collections::HashMap;
 use winit::window::Window;
 
 /// Coordinates GPU resources and per-frame rendering.
@@ -127,8 +128,18 @@ impl Renderer {
     }
 
     /// Replaces the scene meshes with chunk meshes built from the provided data.
-    pub fn set_chunk_meshes(&mut self, meshes: Vec<Mesh>) {
+    pub fn set_chunk_meshes(&mut self, meshes: HashMap<crate::world::ChunkPos, Mesh>) {
         self.scene.set_meshes(meshes);
+    }
+
+    /// Inserts or replaces one chunk mesh.
+    pub fn set_chunk_mesh(&mut self, pos: crate::world::ChunkPos, mesh: Mesh) {
+        self.scene.set_chunk_mesh(pos, mesh);
+    }
+
+    /// Removes one chunk mesh.
+    pub fn remove_chunk_mesh(&mut self, pos: crate::world::ChunkPos) {
+        self.scene.remove_chunk_mesh(pos);
     }
 
     /// Encodes and presents one frame.

@@ -4,7 +4,9 @@
 //! it or how the swapchain frame is acquired.
 
 use super::mesh::Mesh;
+use crate::world::ChunkPos;
 use glam::Mat4;
+use std::collections::HashMap;
 
 /// Renderable world state for the current frame.
 ///
@@ -15,7 +17,7 @@ use glam::Mat4;
 pub struct Scene {
     clear_color: wgpu::Color,
     view_projection: Mat4,
-    meshes: Vec<Mesh>,
+    meshes: HashMap<ChunkPos, Mesh>,
 }
 
 impl Scene {
@@ -34,7 +36,7 @@ impl Scene {
                 a: 1.0,
             },
             view_projection,
-            meshes: Vec::new(),
+            meshes: HashMap::new(),
         }
     }
 
@@ -54,12 +56,22 @@ impl Scene {
     }
 
     /// Meshes submitted for rendering this frame.
-    pub fn meshes(&self) -> &[Mesh] {
-        &self.meshes
+    pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.meshes.values()
     }
 
     /// Replaces all scene meshes (e.g. when switching from debug shapes to chunks).
-    pub fn set_meshes(&mut self, meshes: Vec<Mesh>) {
+    pub fn set_meshes(&mut self, meshes: HashMap<ChunkPos, Mesh>) {
         self.meshes = meshes;
+    }
+
+    /// Inserts or replaces one chunk mesh.
+    pub fn set_chunk_mesh(&mut self, pos: ChunkPos, mesh: Mesh) {
+        self.meshes.insert(pos, mesh);
+    }
+
+    /// Removes one chunk mesh.
+    pub fn remove_chunk_mesh(&mut self, pos: ChunkPos) {
+        self.meshes.remove(&pos);
     }
 }

@@ -55,10 +55,14 @@ fn biome_tint(path: &str, biome: &str) -> [f32; 3] {
     let rgb = match (path, biome) {
         ("block/water_still", "desert") => [0x44, 0xaf, 0xd8],
         ("block/water_still", _) => [0x3f, 0x76, 0xe4],
-        ("block/grass_block_top", "desert") => [0xb7, 0xb7, 0x63],
-        ("block/grass_block_top", "forest") => [0x79, 0xc0, 0x5a],
-        ("block/grass_block_top", "hills") => [0x8a, 0xb6, 0x89],
-        ("block/grass_block_top", _) => [0x91, 0xbd, 0x59],
+        ("block/grass_block_top" | "block/grass_block_side_overlay", "desert") => {
+            [0xb7, 0xb7, 0x63]
+        }
+        ("block/grass_block_top" | "block/grass_block_side_overlay", "forest") => {
+            [0x79, 0xc0, 0x5a]
+        }
+        ("block/grass_block_top" | "block/grass_block_side_overlay", "hills") => [0x8a, 0xb6, 0x89],
+        ("block/grass_block_top" | "block/grass_block_side_overlay", _) => [0x91, 0xbd, 0x59],
         ("block/oak_leaves", "desert") => [0xa0, 0xa7, 0x55],
         ("block/oak_leaves", "forest") => [0x59, 0xae, 0x30],
         ("block/oak_leaves", "hills") => [0x71, 0x91, 0x5f],
@@ -73,29 +77,35 @@ fn biome_tint(path: &str, biome: &str) -> [f32; 3] {
     ]
 }
 
-fn occludes(blocks: &[BlockId], x: usize, y: usize, z: usize, dx: i32, dy: i32, dz: i32) -> bool {
-    let nx = x as i32 + dx;
-    let ny = y as i32 + dy;
-    let nz = z as i32 + dz;
-    if nx < 0 || ny < 0 || nz < 0 || nx >= SX as i32 || ny >= SY as i32 || nz >= SZ as i32 {
+fn block_at_world(world: &World, x: i32, y: i32, z: i32) -> BlockId {
+    if !(0..SY as i32).contains(&y) {
+        return BlockId::AIR;
+    }
+
+    world.get_block(crate::world::BlockPos(x, y, z))
+}
+
+fn occludes(world: &World, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> bool {
+    let ny = y + dy;
+    if !(0..SY as i32).contains(&ny) {
         return false;
     }
 
-    let block = &blocks[ny as usize * SLICE + nz as usize * SX + nx as usize];
-    !block.0.is_empty() && !is_transparent(block)
+    let block = block_at_world(world, x + dx, ny, z + dz);
+    !block.0.is_empty() && !is_transparent(&block)
 }
 
 fn vertex_ao(
-    blocks: &[BlockId],
-    x: usize,
-    y: usize,
-    z: usize,
+    world: &World,
+    x: i32,
+    y: i32,
+    z: i32,
     normal: [i32; 3],
     side_a: [i32; 3],
     side_b: [i32; 3],
 ) -> f32 {
     let side_1 = occludes(
-        blocks,
+        world,
         x,
         y,
         z,
@@ -104,7 +114,7 @@ fn vertex_ao(
         normal[2] + side_a[2],
     );
     let side_2 = occludes(
-        blocks,
+        world,
         x,
         y,
         z,
@@ -113,7 +123,7 @@ fn vertex_ao(
         normal[2] + side_b[2],
     );
     let corner = occludes(
-        blocks,
+        world,
         x,
         y,
         z,
@@ -130,7 +140,7 @@ fn vertex_ao(
     [0.45, 0.62, 0.8, 1.0][level as usize]
 }
 
-fn face_ao(blocks: &[BlockId], x: usize, y: usize, z: usize, dir: u8) -> [f32; 4] {
+fn face_ao(world: &World, x: i32, y: i32, z: i32, dir: u8) -> [f32; 4] {
     let (normal, sides): ([i32; 3], [[i32; 3]; 4]) = match dir {
         0 => ([1, 0, 0], [[0, -1, 0], [0, 1, 0], [0, 1, 0], [0, -1, 0]]),
         1 => ([-1, 0, 0], [[0, -1, 0], [0, 1, 0], [0, 1, 0], [0, -1, 0]]),
@@ -148,10 +158,10 @@ fn face_ao(blocks: &[BlockId], x: usize, y: usize, z: usize, dir: u8) -> [f32; 4
     };
 
     [
-        vertex_ao(blocks, x, y, z, normal, sides[0], other_sides[0]),
-        vertex_ao(blocks, x, y, z, normal, sides[1], other_sides[1]),
-        vertex_ao(blocks, x, y, z, normal, sides[2], other_sides[2]),
-        vertex_ao(blocks, x, y, z, normal, sides[3], other_sides[3]),
+        vertex_ao(world, x, y, z, normal, sides[0], other_sides[0]),
+        vertex_ao(world, x, y, z, normal, sides[1], other_sides[1]),
+        vertex_ao(world, x, y, z, normal, sides[2], other_sides[2]),
+        vertex_ao(world, x, y, z, normal, sides[3], other_sides[3]),
     ]
 }
 
@@ -172,6 +182,17 @@ fn face_uv<'a>(
         random_rotation(texture, x, y, z, face),
         texture,
     )
+}
+
+fn grass_side_overlay_offset(dir: u8) -> (f32, f32) {
+    let nudge = 0.001;
+    match dir {
+        0 => (nudge, 0.0),
+        1 => (-nudge, 0.0),
+        4 => (0.0, nudge),
+        5 => (0.0, -nudge),
+        _ => (0.0, 0.0),
+    }
 }
 
 /// Output of the mesher.
@@ -226,6 +247,7 @@ pub fn mesh_chunk(
                 let fy = y as f32;
                 let fz = chunk_origin_z + z as f32;
                 let world_x = chunk.pos().0 * SX as i32 + x as i32;
+                let world_y = y as i32;
                 let world_z = chunk.pos().1 * SZ as i32 + z as i32;
                 let biome_id =
                     biome_source.sample_biome_id(world, noise_settings, world_x, world_z);
@@ -238,8 +260,9 @@ pub fn mesh_chunk(
                     };
 
                 // Right (+X)
-                if x + 1 >= SX || face_visible(block, &blocks[idx + 1]) {
+                if face_visible(block, &block_at_world(world, world_x + 1, world_y, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas, Face::Right, x, y, z);
+                    let ao = face_ao(world, world_x, world_y, world_z, 0);
                     let q = quad(
                         0,
                         fx,
@@ -248,14 +271,30 @@ pub fn mesh_chunk(
                         uv,
                         top_height,
                         rotation,
-                        face_ao(blocks, x, y, z, 0),
+                        ao,
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
+                    if texture == "block/grass_block_side" {
+                        let (dx, dz) = grass_side_overlay_offset(0);
+                        let q = quad(
+                            0,
+                            fx + dx,
+                            fy,
+                            fz + dz,
+                            atlas.uv("block/grass_block_side_overlay"),
+                            top_height,
+                            0,
+                            ao,
+                            biome_tint("block/grass_block_side_overlay", biome),
+                        );
+                        push_quad(verts, inds, off, q);
+                    }
                 }
                 // Left (-X)
-                if x == 0 || face_visible(block, &blocks[idx - 1]) {
+                if face_visible(block, &block_at_world(world, world_x - 1, world_y, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas, Face::Left, x, y, z);
+                    let ao = face_ao(world, world_x, world_y, world_z, 1);
                     let q = quad(
                         1,
                         fx,
@@ -264,13 +303,28 @@ pub fn mesh_chunk(
                         uv,
                         top_height,
                         rotation,
-                        face_ao(blocks, x, y, z, 1),
+                        ao,
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
+                    if texture == "block/grass_block_side" {
+                        let (dx, dz) = grass_side_overlay_offset(1);
+                        let q = quad(
+                            1,
+                            fx + dx,
+                            fy,
+                            fz + dz,
+                            atlas.uv("block/grass_block_side_overlay"),
+                            top_height,
+                            0,
+                            ao,
+                            biome_tint("block/grass_block_side_overlay", biome),
+                        );
+                        push_quad(verts, inds, off, q);
+                    }
                 }
                 // Top (+Y)
-                if y + 1 >= SY || face_visible(block, &blocks[idx + SLICE]) {
+                if face_visible(block, &block_at_world(world, world_x, world_y + 1, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas, Face::Top, x, y, z);
                     let q = quad(
                         2,
@@ -280,13 +334,13 @@ pub fn mesh_chunk(
                         uv,
                         top_height,
                         rotation,
-                        face_ao(blocks, x, y, z, 2),
+                        face_ao(world, world_x, world_y, world_z, 2),
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Bottom (-Y)
-                if y == 0 || face_visible(block, &blocks[idx - SLICE]) {
+                if face_visible(block, &block_at_world(world, world_x, world_y - 1, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas, Face::Bottom, x, y, z);
                     let q = quad(
                         3,
@@ -296,14 +350,15 @@ pub fn mesh_chunk(
                         uv,
                         top_height,
                         rotation,
-                        face_ao(blocks, x, y, z, 3),
+                        face_ao(world, world_x, world_y, world_z, 3),
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
                 }
                 // Front (+Z)
-                if z + 1 >= SZ || face_visible(block, &blocks[idx + SX]) {
+                if face_visible(block, &block_at_world(world, world_x, world_y, world_z + 1)) {
                     let (uv, rotation, texture) = face_uv(model, atlas, Face::Front, x, y, z);
+                    let ao = face_ao(world, world_x, world_y, world_z, 4);
                     let q = quad(
                         4,
                         fx,
@@ -312,14 +367,30 @@ pub fn mesh_chunk(
                         uv,
                         top_height,
                         rotation,
-                        face_ao(blocks, x, y, z, 4),
+                        ao,
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
+                    if texture == "block/grass_block_side" {
+                        let (dx, dz) = grass_side_overlay_offset(4);
+                        let q = quad(
+                            4,
+                            fx + dx,
+                            fy,
+                            fz + dz,
+                            atlas.uv("block/grass_block_side_overlay"),
+                            top_height,
+                            0,
+                            ao,
+                            biome_tint("block/grass_block_side_overlay", biome),
+                        );
+                        push_quad(verts, inds, off, q);
+                    }
                 }
                 // Back (-Z)
-                if z == 0 || face_visible(block, &blocks[idx - SX]) {
+                if face_visible(block, &block_at_world(world, world_x, world_y, world_z - 1)) {
                     let (uv, rotation, texture) = face_uv(model, atlas, Face::Back, x, y, z);
+                    let ao = face_ao(world, world_x, world_y, world_z, 5);
                     let q = quad(
                         5,
                         fx,
@@ -328,10 +399,25 @@ pub fn mesh_chunk(
                         uv,
                         top_height,
                         rotation,
-                        face_ao(blocks, x, y, z, 5),
+                        ao,
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
+                    if texture == "block/grass_block_side" {
+                        let (dx, dz) = grass_side_overlay_offset(5);
+                        let q = quad(
+                            5,
+                            fx + dx,
+                            fy,
+                            fz + dz,
+                            atlas.uv("block/grass_block_side_overlay"),
+                            top_height,
+                            0,
+                            ao,
+                            biome_tint("block/grass_block_side_overlay", biome),
+                        );
+                        push_quad(verts, inds, off, q);
+                    }
                 }
             }
         }

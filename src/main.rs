@@ -51,6 +51,7 @@ const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
 const DEMO_WORLD_SEED: u64 = 12_345;
 const DEMO_SPAWN_CHUNK_RADIUS: i32 = 4;
+const RUNTIME_CHUNK_LOAD_RADIUS: i32 = 4;
 const CHUNKS_GENERATED_PER_TICK: usize = 1;
 const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const WORLD_RENDER_OFFSET: f32 = 8.5;
@@ -109,6 +110,9 @@ impl ApplicationHandler for App {
                         paths.push(tex.to_string());
                     }
                 }
+            }
+            if seen.insert("block/grass_block_side_overlay".to_string()) {
+                paths.push("block/grass_block_side_overlay".to_string());
             }
             paths
         };
@@ -292,16 +296,20 @@ impl App {
             let generated = self.generate_missing_chunks_around(center_chunk);
             let unloaded = self.unload_far_chunks(center_chunk);
             if generated > 0 || unloaded > 0 {
-                self.rebuild_chunk_meshes(true);
                 return;
             }
         }
-        self.rebuild_chunk_meshes(false);
+        self.mesh_center_chunk = camera_position
+            .map(camera_chunk_pos)
+            .unwrap_or(self.mesh_center_chunk);
     }
 
     fn generate_missing_chunks_around(&mut self, center_chunk: world::ChunkPos) -> usize {
         let mut generated = 0;
-        let radius = self.render_distance_chunks.max(DEMO_SPAWN_CHUNK_RADIUS);
+        let radius = self
+            .render_distance_chunks
+            .min(RUNTIME_CHUNK_LOAD_RADIUS)
+            .max(0);
 
         'outer: for distance in 0..=radius {
             for chunk_x in center_chunk.0 - distance..=center_chunk.0 + distance {
@@ -327,6 +335,7 @@ impl App {
                         &self.biome_source,
                         chunk_pos,
                     );
+                    self.rebuild_chunk_meshes_near(chunk_pos);
                     generated += 1;
                     if generated >= CHUNKS_GENERATED_PER_TICK {
                         break 'outer;
@@ -346,6 +355,9 @@ impl App {
                 .abs()
                 .max((chunk_pos.1 - center_chunk.1).abs());
             if distance > unload_distance && self.world.unload_chunk(chunk_pos) {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.remove_chunk_mesh(chunk_pos);
+                }
                 unloaded += 1;
             }
         }
@@ -424,6 +436,32 @@ impl App {
         self.mesh_center_chunk = center_chunk;
     }
 
+    fn rebuild_chunk_meshes_near(&mut self, center: world::ChunkPos) {
+        let positions = [
+            center,
+            world::ChunkPos(center.0 + 1, center.1),
+            world::ChunkPos(center.0 - 1, center.1),
+            world::ChunkPos(center.0, center.1 + 1),
+            world::ChunkPos(center.0, center.1 - 1),
+        ];
+
+        let (Some(renderer), Some(block_models)) = (&mut self.renderer, self.block_models.as_ref())
+        else {
+            return;
+        };
+
+        for pos in positions {
+            rebuild_one_chunk_mesh(
+                renderer,
+                block_models,
+                &self.world,
+                &self.biome_source,
+                &self.noise_settings,
+                pos,
+            );
+        }
+    }
+
     fn update_debug_biome(&mut self, position: Vec3) {
         let block_pos = camera_block_pos(position);
         let biome_name = self
@@ -469,7 +507,7 @@ fn build_chunk_meshes(
     // Mesh each chunk and build GPU meshes.
     let material_layout = renderer.material_layout();
     let device = &renderer.device;
-    let mut meshes = Vec::new();
+    let mut meshes = HashMap::new();
 
     for chunk in world.chunks() {
         let pos = chunk.pos();
@@ -500,11 +538,53 @@ fn build_chunk_meshes(
             &data.vertices,
             &data.indices,
         );
-        meshes.push(mesh);
+        meshes.insert(pos, mesh);
     }
 
-    log::info!(target: "mesher", "Built {} chunk meshes within render distance {render_distance_chunks}", meshes.len());
+    log::debug!(target: "mesher", "Built {} chunk meshes within render distance {render_distance_chunks}", meshes.len());
     renderer.set_chunk_meshes(meshes);
+}
+
+fn rebuild_one_chunk_mesh(
+    renderer: &mut renderer::Renderer,
+    block_models: &crate::registry::Registry<model::BlockModel>,
+    world: &world::World,
+    biome_source: &worldgen::BiomeSource,
+    noise_settings: &worldgen::NoiseSettings,
+    chunk_pos: world::ChunkPos,
+) {
+    let Some(chunk) = world.chunk(chunk_pos) else {
+        renderer.remove_chunk_mesh(chunk_pos);
+        return;
+    };
+
+    let model_map: std::collections::HashMap<String, model::BlockModel> = block_models
+        .iter()
+        .map(|(id, m)| (id.path().to_string(), m.clone()))
+        .collect();
+    let data = mesher::mesh_chunk(
+        chunk,
+        world,
+        biome_source,
+        noise_settings,
+        &model_map,
+        &renderer.atlas,
+    );
+
+    if data.vertices.is_empty() {
+        renderer.remove_chunk_mesh(chunk_pos);
+        return;
+    }
+
+    let mesh = renderer::Mesh::from_vertices(
+        &renderer.device,
+        renderer.material_layout(),
+        &format!("chunk_{}_{}", chunk_pos.0, chunk_pos.1),
+        [0.8, 0.85, 0.75, 1.0],
+        &data.vertices,
+        &data.indices,
+    );
+    renderer.set_chunk_mesh(chunk_pos, mesh);
 }
 
 fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {

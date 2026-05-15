@@ -230,24 +230,42 @@ impl NoiseSettings {
     /// Small demo settings that create readable low hills in the current 64-high world.
     pub fn demo() -> Self {
         Self {
-            base_height: 2,
-            height_scale: 3.5,
-            sea_level: 3,
-            continentalness_scale: 0.035,
-            erosion_scale: 0.09,
-            peaks_valleys_scale: 0.18,
+            base_height: 16,
+            height_scale: 15.0,
+            sea_level: 12,
+            continentalness_scale: 0.015,
+            erosion_scale: 0.035,
+            peaks_valleys_scale: 0.055,
         }
     }
 
     /// Samples Minecraft-like terrain shaping signals for a world column.
     pub fn sample(&self, world: &World, x: i32, z: i32) -> TerrainNoiseSample {
-        let continentalness = fbm(world, x, z, 101, self.continentalness_scale, 4);
-        let erosion = fbm(world, x, z, 202, self.erosion_scale, 3);
-        let peaks_valleys = fbm(world, x, z, 303, self.peaks_valleys_scale, 2);
-        let shape = continentalness * 0.65 - erosion.abs() * 0.35 + peaks_valleys * 0.25;
+        let warp_x = fbm_f32(world, x as f32, z as f32, 707, 0.01, 2) * 10.0;
+        let warp_z = fbm_f32(world, x as f32, z as f32, 708, 0.01, 2) * 10.0;
+        let wx = x as f32 + warp_x;
+        let wz = z as f32 + warp_z;
+
+        let continentalness = fbm_f32(world, wx, wz, 101, self.continentalness_scale, 5);
+        let erosion = fbm_f32(world, wx, wz, 202, self.erosion_scale, 4);
+        let peaks_valleys = fbm_f32(world, wx, wz, 303, self.peaks_valleys_scale, 4);
+        let local_detail = fbm_f32(world, x as f32, z as f32, 304, 0.16, 2) * 0.04;
+
+        let land = smoothstep(((continentalness + 1.0) * 0.5).clamp(0.0, 1.0));
+        let ridge = 1.0 - peaks_valleys.abs();
+        let ridge = ridge * ridge;
+        let erosion_cut = (1.0 - erosion.abs() * 0.75).clamp(0.15, 1.0);
+        let continental_lift = continentalness * 0.38;
+        let ocean_depth = (0.38 - land).max(0.0) * -0.45;
+        let plains = (land - 0.35).max(0.0) * 0.35;
+        let hills = ridge * erosion_cut * land * 0.42;
+        let mountains = ridge.powf(3.0) * land.powf(1.6) * 0.52;
+        let valleys = (1.0 - ridge) * land * -0.18;
+        let shape =
+            continental_lift + ocean_depth + plains + hills + mountains + valleys + local_detail;
         let height = (self.base_height as f32 + shape * self.height_scale)
             .round()
-            .clamp(1.0, 8.0) as i32;
+            .clamp(4.0, 48.0) as i32;
 
         TerrainNoiseSample {
             continentalness,
@@ -749,18 +767,18 @@ fn place_stone_pile(world: &mut World, origin: BlockPos) {
 }
 
 fn fbm(world: &World, x: i32, z: i32, salt: u64, scale: f32, octaves: u32) -> f32 {
+    fbm_f32(world, x as f32, z as f32, salt, scale, octaves)
+}
+
+fn fbm_f32(world: &World, x: f32, z: f32, salt: u64, scale: f32, octaves: u32) -> f32 {
     let mut value = 0.0;
     let mut amplitude = 1.0;
     let mut frequency = scale;
     let mut max = 0.0;
 
     for octave in 0..octaves {
-        value += smooth_noise(
-            world,
-            x as f32 * frequency,
-            z as f32 * frequency,
-            salt + octave as u64,
-        ) * amplitude;
+        value +=
+            smooth_noise(world, x * frequency, z * frequency, salt + octave as u64) * amplitude;
         max += amplitude;
         amplitude *= 0.5;
         frequency *= 2.0;
@@ -865,7 +883,7 @@ mod tests {
         let noise = NoiseSettings::demo();
         let source = BiomeSource::demo();
         let water = BlockId("water".to_string());
-        let chunk_pos = (-4..=4)
+        let chunk_pos = (-12..=12)
             .flat_map(|cx| (-4..=4).map(move |cz| ChunkPos(cx, cz)))
             .find(|chunk_pos| {
                 let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;

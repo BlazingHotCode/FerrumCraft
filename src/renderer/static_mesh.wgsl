@@ -46,5 +46,8 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(block_texture, texture_sampler, input.tex_coords);
     let color = tex_color * material.base_color;
+    if (color.a < 0.01) {
+        discard;
+    }
     return vec4<f32>(color.rgb * input.tint * input.ao, color.a);
 }

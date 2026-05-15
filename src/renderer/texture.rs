@@ -90,9 +90,7 @@ impl TextureAtlas {
 
             load_texture_meta(resources, namespace, path);
 
-            if *path == "block/grass_block_side" {
-                apply_grass_side_overlay(resources, namespace, &mut frames);
-            } else if *path == "block/water_still" {
+            if *path == "block/water_still" {
                 apply_water_overlay(resources, namespace, &mut frames);
             }
 
