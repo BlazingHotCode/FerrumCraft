@@ -223,6 +223,10 @@ impl TextureAtlas {
             .unwrap_or([0.0, 0.0, 0.0625, 0.0625])
     }
 
+    pub fn uv_map(&self) -> HashMap<String, [f32; 4]> {
+        self.uv_map.clone()
+    }
+
     pub fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Texture atlas bind group layout"),

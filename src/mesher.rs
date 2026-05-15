@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use crate::block::BlockId;
 use crate::model::{BlockModel, Face};
-use crate::renderer::TextureAtlas;
 use crate::renderer::Vertex;
 use crate::world::{Chunk, World};
 use crate::worldgen::{BiomeSource, NoiseSettings};
@@ -167,7 +166,7 @@ fn face_ao(world: &World, x: i32, y: i32, z: i32, dir: u8) -> [f32; 4] {
 
 fn face_uv<'a>(
     model: Option<&'a BlockModel>,
-    atlas: &TextureAtlas,
+    atlas_uv: &HashMap<String, [f32; 4]>,
     face: Face,
     x: usize,
     y: usize,
@@ -178,7 +177,10 @@ fn face_uv<'a>(
     };
     let texture = model.texture(face);
     (
-        atlas.uv(texture),
+        atlas_uv
+            .get(texture)
+            .copied()
+            .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
         random_rotation(texture, x, y, z, face),
         texture,
     )
@@ -214,7 +216,7 @@ pub fn mesh_chunk(
     biome_source: &BiomeSource,
     noise_settings: &NoiseSettings,
     model_map: &HashMap<String, BlockModel>,
-    atlas: &TextureAtlas,
+    atlas_uv: &HashMap<String, [f32; 4]>,
 ) -> MeshData {
     let blocks = chunk.blocks();
     let chunk_origin_x = chunk.pos().0 as f32 * SX as f32;
@@ -279,7 +281,7 @@ pub fn mesh_chunk(
 
                 // Right (+X)
                 if face_visible(block, &block_at_world(world, world_x + 1, world_y, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Right, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Right, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 0);
                     let q = quad(
                         0,
@@ -300,7 +302,10 @@ pub fn mesh_chunk(
                             fx + dx,
                             fy,
                             fz + dz,
-                            atlas.uv("block/grass_block_side_overlay"),
+                            atlas_uv
+                                .get("block/grass_block_side_overlay")
+                                .copied()
+                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
                             0,
                             ao,
@@ -311,7 +316,7 @@ pub fn mesh_chunk(
                 }
                 // Left (-X)
                 if face_visible(block, &block_at_world(world, world_x - 1, world_y, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Left, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Left, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 1);
                     let q = quad(
                         1,
@@ -332,7 +337,10 @@ pub fn mesh_chunk(
                             fx + dx,
                             fy,
                             fz + dz,
-                            atlas.uv("block/grass_block_side_overlay"),
+                            atlas_uv
+                                .get("block/grass_block_side_overlay")
+                                .copied()
+                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
                             0,
                             ao,
@@ -343,7 +351,7 @@ pub fn mesh_chunk(
                 }
                 // Top (+Y)
                 if face_visible(block, &block_at_world(world, world_x, world_y + 1, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Top, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Top, x, y, z);
                     let q = quad(
                         2,
                         fx,
@@ -359,7 +367,7 @@ pub fn mesh_chunk(
                 }
                 // Bottom (-Y)
                 if face_visible(block, &block_at_world(world, world_x, world_y - 1, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Bottom, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Bottom, x, y, z);
                     let q = quad(
                         3,
                         fx,
@@ -375,7 +383,7 @@ pub fn mesh_chunk(
                 }
                 // Front (+Z)
                 if face_visible(block, &block_at_world(world, world_x, world_y, world_z + 1)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Front, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Front, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 4);
                     let q = quad(
                         4,
@@ -396,7 +404,10 @@ pub fn mesh_chunk(
                             fx + dx,
                             fy,
                             fz + dz,
-                            atlas.uv("block/grass_block_side_overlay"),
+                            atlas_uv
+                                .get("block/grass_block_side_overlay")
+                                .copied()
+                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
                             0,
                             ao,
@@ -407,7 +418,7 @@ pub fn mesh_chunk(
                 }
                 // Back (-Z)
                 if face_visible(block, &block_at_world(world, world_x, world_y, world_z - 1)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas, Face::Back, x, y, z);
+                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Back, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 5);
                     let q = quad(
                         5,
@@ -428,7 +439,10 @@ pub fn mesh_chunk(
                             fx + dx,
                             fy,
                             fz + dz,
-                            atlas.uv("block/grass_block_side_overlay"),
+                            atlas_uv
+                                .get("block/grass_block_side_overlay")
+                                .copied()
+                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
                             0,
                             ao,
