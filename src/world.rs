@@ -128,6 +128,7 @@ impl Chunk {
 pub struct World {
     seed: u64,
     chunks: HashMap<ChunkPos, Chunk>,
+    cached_chunks: HashMap<ChunkPos, Chunk>,
     dirty_chunks: Vec<ChunkPos>,
 }
 
@@ -142,6 +143,7 @@ impl World {
         Self {
             seed,
             chunks: HashMap::new(),
+            cached_chunks: HashMap::new(),
             dirty_chunks: Vec::new(),
         }
     }
@@ -201,18 +203,35 @@ impl World {
         self.chunks.contains_key(&pos)
     }
 
-    /// Ensures a chunk exists at the given position, filled with air.
-    pub fn load_chunk(&mut self, pos: ChunkPos) {
-        self.chunks.entry(pos).or_insert_with(|| Chunk::new(pos));
+    /// Returns `true` if the chunk has been generated and cached after unloading.
+    pub fn is_chunk_cached(&self, pos: ChunkPos) -> bool {
+        self.cached_chunks.contains_key(&pos)
     }
 
-    /// Unloads a chunk and drops any pending dirty marker for it.
-    pub fn unload_chunk(&mut self, pos: ChunkPos) -> bool {
-        let removed = self.chunks.remove(&pos).is_some();
-        if removed {
-            self.dirty_chunks.retain(|dirty| *dirty != pos);
+    /// Ensures a chunk exists at the given position, restoring cached data if present.
+    pub fn load_chunk(&mut self, pos: ChunkPos) -> bool {
+        if self.chunks.contains_key(&pos) {
+            return true;
         }
-        removed
+
+        if let Some(chunk) = self.cached_chunks.remove(&pos) {
+            self.chunks.insert(pos, chunk);
+            true
+        } else {
+            self.chunks.insert(pos, Chunk::new(pos));
+            false
+        }
+    }
+
+    /// Unloads a chunk into the in-memory cache and drops any pending dirty marker for it.
+    pub fn unload_chunk(&mut self, pos: ChunkPos) -> bool {
+        if let Some(chunk) = self.chunks.remove(&pos) {
+            self.cached_chunks.insert(pos, chunk);
+            self.dirty_chunks.retain(|dirty| *dirty != pos);
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns an iterator over all loaded chunks.
@@ -243,6 +262,11 @@ impl World {
     /// Number of loaded chunks.
     pub fn chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    /// Number of generated chunks kept in the in-memory cache.
+    pub fn cached_chunk_count(&self) -> usize {
+        self.cached_chunks.len()
     }
 
     /// Gets a block property value at an absolute world position.
@@ -334,7 +358,27 @@ mod tests {
         assert!(w.is_chunk_loaded(pos));
         assert!(w.unload_chunk(pos));
         assert!(!w.is_chunk_loaded(pos));
+        assert!(w.is_chunk_cached(pos));
         assert!(w.drain_dirty().is_empty());
+    }
+
+    #[test]
+    fn world_restores_cached_chunks_without_losing_blocks() {
+        let mut w = World::new();
+        let pos = ChunkPos(1, -1);
+        let block_pos = BlockPos(16, 0, -1);
+        let block = BlockId("cached".to_string());
+
+        w.set_block(block_pos, block.clone());
+        assert!(w.unload_chunk(pos));
+        assert_eq!(w.cached_chunk_count(), 1);
+        assert_eq!(w.get_block(block_pos), BlockId::AIR);
+
+        assert!(w.load_chunk(pos));
+        assert!(w.is_chunk_loaded(pos));
+        assert!(!w.is_chunk_cached(pos));
+        assert_eq!(w.cached_chunk_count(), 0);
+        assert_eq!(w.get_block(block_pos), block);
     }
 
     #[test]

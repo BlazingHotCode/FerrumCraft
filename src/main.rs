@@ -324,14 +324,18 @@ impl App {
                         continue;
                     }
 
-                    generate_worldgen_chunk(
-                        &mut self.world,
-                        &self.worldgen_feature_types,
-                        &self.structure_sets,
-                        &self.noise_settings,
-                        &self.biome_source,
-                        chunk_pos,
-                    );
+                    if self.world.is_chunk_cached(chunk_pos) {
+                        self.world.load_chunk(chunk_pos);
+                    } else {
+                        generate_worldgen_chunk(
+                            &mut self.world,
+                            &self.worldgen_feature_types,
+                            &self.structure_sets,
+                            &self.noise_settings,
+                            &self.biome_source,
+                            chunk_pos,
+                        );
+                    }
                     self.rebuild_chunk_meshes_near(chunk_pos);
                     generated += 1;
                     if generated >= CHUNKS_GENERATED_PER_TICK {
