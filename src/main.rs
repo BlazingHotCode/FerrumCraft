@@ -507,7 +507,8 @@ fn build_chunk_meshes(
     // Mesh each chunk and build GPU meshes.
     let material_layout = renderer.material_layout();
     let device = &renderer.device;
-    let mut meshes = HashMap::new();
+    let mut opaque_meshes = HashMap::new();
+    let mut transparent_meshes = HashMap::new();
 
     for chunk in world.chunks() {
         let pos = chunk.pos();
@@ -526,23 +527,36 @@ fn build_chunk_meshes(
             &model_map,
             &renderer.atlas,
         );
-        if data.vertices.is_empty() {
-            continue;
+        if !data.opaque.vertices.is_empty() {
+            opaque_meshes.insert(
+                pos,
+                renderer::Mesh::from_vertices(
+                    device,
+                    material_layout,
+                    &format!("chunk_{}_{}_opaque", pos.0, pos.1),
+                    [0.8, 0.85, 0.75, 1.0],
+                    &data.opaque.vertices,
+                    &data.opaque.indices,
+                ),
+            );
         }
-
-        let mesh = renderer::Mesh::from_vertices(
-            device,
-            material_layout,
-            &format!("chunk_{}", chunk.pos().0),
-            [0.8, 0.85, 0.75, 1.0],
-            &data.vertices,
-            &data.indices,
-        );
-        meshes.insert(pos, mesh);
+        if !data.transparent.vertices.is_empty() {
+            transparent_meshes.insert(
+                pos,
+                renderer::Mesh::from_vertices(
+                    device,
+                    material_layout,
+                    &format!("chunk_{}_{}_transparent", pos.0, pos.1),
+                    [0.8, 0.85, 0.75, 1.0],
+                    &data.transparent.vertices,
+                    &data.transparent.indices,
+                ),
+            );
+        }
     }
 
-    log::debug!(target: "mesher", "Built {} chunk meshes within render distance {render_distance_chunks}", meshes.len());
-    renderer.set_chunk_meshes(meshes);
+    log::debug!(target: "mesher", "Built {} opaque and {} transparent chunk meshes within render distance {render_distance_chunks}", opaque_meshes.len(), transparent_meshes.len());
+    renderer.set_chunk_meshes(opaque_meshes, transparent_meshes);
 }
 
 fn rebuild_one_chunk_mesh(
@@ -571,20 +585,29 @@ fn rebuild_one_chunk_mesh(
         &renderer.atlas,
     );
 
-    if data.vertices.is_empty() {
-        renderer.remove_chunk_mesh(chunk_pos);
-        return;
-    }
+    let opaque_mesh = (!data.opaque.vertices.is_empty()).then(|| {
+        renderer::Mesh::from_vertices(
+            &renderer.device,
+            renderer.material_layout(),
+            &format!("chunk_{}_{}_opaque", chunk_pos.0, chunk_pos.1),
+            [0.8, 0.85, 0.75, 1.0],
+            &data.opaque.vertices,
+            &data.opaque.indices,
+        )
+    });
+    let transparent_mesh = (!data.transparent.vertices.is_empty()).then(|| {
+        renderer::Mesh::from_vertices(
+            &renderer.device,
+            renderer.material_layout(),
+            &format!("chunk_{}_{}_transparent", chunk_pos.0, chunk_pos.1),
+            [0.8, 0.85, 0.75, 1.0],
+            &data.transparent.vertices,
+            &data.transparent.indices,
+        )
+    });
 
-    let mesh = renderer::Mesh::from_vertices(
-        &renderer.device,
-        renderer.material_layout(),
-        &format!("chunk_{}_{}", chunk_pos.0, chunk_pos.1),
-        [0.8, 0.85, 0.75, 1.0],
-        &data.vertices,
-        &data.indices,
-    );
-    renderer.set_chunk_mesh(chunk_pos, mesh);
+    renderer.set_opaque_chunk_mesh(chunk_pos, opaque_mesh);
+    renderer.set_transparent_chunk_mesh(chunk_pos, transparent_mesh);
 }
 
 fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {

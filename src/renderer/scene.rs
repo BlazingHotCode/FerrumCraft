@@ -17,7 +17,8 @@ use std::collections::HashMap;
 pub struct Scene {
     clear_color: wgpu::Color,
     view_projection: Mat4,
-    meshes: HashMap<ChunkPos, Mesh>,
+    opaque_meshes: HashMap<ChunkPos, Mesh>,
+    transparent_meshes: HashMap<ChunkPos, Mesh>,
 }
 
 impl Scene {
@@ -36,7 +37,8 @@ impl Scene {
                 a: 1.0,
             },
             view_projection,
-            meshes: HashMap::new(),
+            opaque_meshes: HashMap::new(),
+            transparent_meshes: HashMap::new(),
         }
     }
 
@@ -56,22 +58,46 @@ impl Scene {
     }
 
     /// Meshes submitted for rendering this frame.
-    pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
-        self.meshes.values()
+    pub fn opaque_meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.opaque_meshes.values()
+    }
+
+    /// Transparent meshes submitted for rendering after opaque geometry.
+    pub fn transparent_meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.transparent_meshes.values()
     }
 
     /// Replaces all scene meshes (e.g. when switching from debug shapes to chunks).
-    pub fn set_meshes(&mut self, meshes: HashMap<ChunkPos, Mesh>) {
-        self.meshes = meshes;
+    pub fn set_meshes(
+        &mut self,
+        opaque_meshes: HashMap<ChunkPos, Mesh>,
+        transparent_meshes: HashMap<ChunkPos, Mesh>,
+    ) {
+        self.opaque_meshes = opaque_meshes;
+        self.transparent_meshes = transparent_meshes;
     }
 
-    /// Inserts or replaces one chunk mesh.
-    pub fn set_chunk_mesh(&mut self, pos: ChunkPos, mesh: Mesh) {
-        self.meshes.insert(pos, mesh);
+    /// Inserts or removes one chunk's opaque mesh.
+    pub fn set_opaque_chunk_mesh(&mut self, pos: ChunkPos, mesh: Option<Mesh>) {
+        if let Some(mesh) = mesh {
+            self.opaque_meshes.insert(pos, mesh);
+        } else {
+            self.opaque_meshes.remove(&pos);
+        }
+    }
+
+    /// Inserts or removes one chunk's transparent mesh.
+    pub fn set_transparent_chunk_mesh(&mut self, pos: ChunkPos, mesh: Option<Mesh>) {
+        if let Some(mesh) = mesh {
+            self.transparent_meshes.insert(pos, mesh);
+        } else {
+            self.transparent_meshes.remove(&pos);
+        }
     }
 
     /// Removes one chunk mesh.
     pub fn remove_chunk_mesh(&mut self, pos: ChunkPos) {
-        self.meshes.remove(&pos);
+        self.opaque_meshes.remove(&pos);
+        self.transparent_meshes.remove(&pos);
     }
 }

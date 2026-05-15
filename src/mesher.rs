@@ -197,6 +197,11 @@ fn grass_side_overlay_offset(dir: u8) -> (f32, f32) {
 
 /// Output of the mesher.
 pub struct MeshData {
+    pub opaque: MeshLayer,
+    pub transparent: MeshLayer,
+}
+
+pub struct MeshLayer {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u16>,
 }
@@ -423,13 +428,15 @@ pub fn mesh_chunk(
         }
     }
 
-    let index_offset = opaque_verts.len() as u16;
-    opaque_inds.extend(transparent_inds.into_iter().map(|i| i + index_offset));
-    opaque_verts.extend(transparent_verts);
-
     MeshData {
-        vertices: opaque_verts,
-        indices: opaque_inds,
+        opaque: MeshLayer {
+            vertices: opaque_verts,
+            indices: opaque_inds,
+        },
+        transparent: MeshLayer {
+            vertices: transparent_verts,
+            indices: transparent_inds,
+        },
     }
 }
 

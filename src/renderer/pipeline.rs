@@ -23,7 +23,8 @@ struct CameraUniform {
 /// where future material, opaque, and transparent pipelines can be added.
 #[derive(Debug)]
 pub struct RenderPipelines {
-    static_mesh: wgpu::RenderPipeline,
+    opaque_mesh: wgpu::RenderPipeline,
+    transparent_mesh: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     material_bind_group_layout: wgpu::BindGroupLayout,
@@ -104,44 +105,14 @@ impl RenderPipelines {
             push_constant_ranges: &[],
         });
 
-        let static_mesh = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Static mesh pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Vertex::layout()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let opaque_mesh =
+            create_static_mesh_pipeline(device, color_format, &shader, &pipeline_layout, true);
+        let transparent_mesh =
+            create_static_mesh_pipeline(device, color_format, &shader, &pipeline_layout, false);
 
         Self {
-            static_mesh,
+            opaque_mesh,
+            transparent_mesh,
             camera_buffer,
             camera_bind_group,
             material_bind_group_layout,
@@ -179,9 +150,11 @@ impl RenderPipelines {
             }),
         );
 
+        let frustum = Frustum::from_view_projection(scene.view_projection());
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Static mesh render pass"),
+                label: Some("Opaque mesh render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -202,30 +175,122 @@ impl RenderPipelines {
                 occlusion_query_set: None,
             });
 
-            pass.set_pipeline(&self.static_mesh);
-            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            self.draw_meshes(
+                &mut pass,
+                &self.opaque_mesh,
+                scene.opaque_meshes(),
+                &frustum,
+                &mut stats,
+            );
+        }
 
-            if let Some(ref tex_bg) = self.texture_bind_group {
-                pass.set_bind_group(2, tex_bg, &[]);
-            }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Transparent mesh render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
-            let frustum = Frustum::from_view_projection(scene.view_projection());
-            for mesh in scene.meshes() {
-                if !mesh.bounds().intersects_frustum(&frustum) {
-                    stats.culled_meshes += 1;
-                    continue;
-                }
-
-                stats.visible_meshes += 1;
-                pass.set_bind_group(1, mesh.material().bind_group(), &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-                pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
-            }
+            self.draw_meshes(
+                &mut pass,
+                &self.transparent_mesh,
+                scene.transparent_meshes(),
+                &frustum,
+                &mut stats,
+            );
         }
 
         stats
     }
+
+    fn draw_meshes<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        pipeline: &'a wgpu::RenderPipeline,
+        meshes: impl Iterator<Item = &'a super::mesh::Mesh>,
+        frustum: &Frustum,
+        stats: &mut RenderStats,
+    ) {
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
+        if let Some(ref tex_bg) = self.texture_bind_group {
+            pass.set_bind_group(2, tex_bg, &[]);
+        }
+
+        for mesh in meshes {
+            if !mesh.bounds().intersects_frustum(frustum) {
+                stats.culled_meshes += 1;
+                continue;
+            }
+
+            stats.visible_meshes += 1;
+            pass.set_bind_group(1, mesh.material().bind_group(), &[]);
+            pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
+            pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
+        }
+    }
+}
+
+fn create_static_mesh_pipeline(
+    device: &wgpu::Device,
+    color_format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    pipeline_layout: &wgpu::PipelineLayout,
+    depth_write_enabled: bool,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Static mesh pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[Vertex::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
 }
 
 /// Texture format used by the depth attachment.

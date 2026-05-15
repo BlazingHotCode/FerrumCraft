@@ -128,13 +128,22 @@ impl Renderer {
     }
 
     /// Replaces the scene meshes with chunk meshes built from the provided data.
-    pub fn set_chunk_meshes(&mut self, meshes: HashMap<crate::world::ChunkPos, Mesh>) {
-        self.scene.set_meshes(meshes);
+    pub fn set_chunk_meshes(
+        &mut self,
+        opaque_meshes: HashMap<crate::world::ChunkPos, Mesh>,
+        transparent_meshes: HashMap<crate::world::ChunkPos, Mesh>,
+    ) {
+        self.scene.set_meshes(opaque_meshes, transparent_meshes);
     }
 
-    /// Inserts or replaces one chunk mesh.
-    pub fn set_chunk_mesh(&mut self, pos: crate::world::ChunkPos, mesh: Mesh) {
-        self.scene.set_chunk_mesh(pos, mesh);
+    /// Inserts or removes one chunk's opaque mesh.
+    pub fn set_opaque_chunk_mesh(&mut self, pos: crate::world::ChunkPos, mesh: Option<Mesh>) {
+        self.scene.set_opaque_chunk_mesh(pos, mesh);
+    }
+
+    /// Inserts or removes one chunk's transparent mesh.
+    pub fn set_transparent_chunk_mesh(&mut self, pos: crate::world::ChunkPos, mesh: Option<Mesh>) {
+        self.scene.set_transparent_chunk_mesh(pos, mesh);
     }
 
     /// Removes one chunk mesh.
