@@ -931,6 +931,10 @@ impl App {
             world::BlockPos(pos.0 - 1, pos.1, pos.2),
             world::BlockPos(pos.0, pos.1, pos.2 + 1),
             world::BlockPos(pos.0, pos.1, pos.2 - 1),
+            world::BlockPos(pos.0 + 2, pos.1, pos.2),
+            world::BlockPos(pos.0 - 2, pos.1, pos.2),
+            world::BlockPos(pos.0, pos.1, pos.2 + 2),
+            world::BlockPos(pos.0, pos.1, pos.2 - 2),
         ] {
             self.queue_water_update(update_pos);
         }
