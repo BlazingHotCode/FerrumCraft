@@ -1402,7 +1402,6 @@ fn create_demo_world(
 ) -> world::World {
     let mut world = world::World::with_seed(DEMO_WORLD_SEED);
 
-    let id = |s: &str| block::BlockId(s.to_string());
     let spawn_chunks = worldgen::spawn_area_chunks(world::ChunkPos(0, 0), DEMO_SPAWN_CHUNK_RADIUS);
 
     for &chunk_pos in &spawn_chunks {
@@ -1415,114 +1414,8 @@ fn create_demo_world(
             chunk_pos,
         );
     }
-    let stone_column = worldgen::ConfiguredFeature {
-        feature_type: id::NamespacedId::ferrumcraft("block_column").expect("valid feature type ID"),
-        config: worldgen::FeatureConfig::BlockColumn {
-            block: id("stone"),
-            min_height: 5,
-            max_height: 8,
-            height_salt: 1,
-        },
-    };
-    worldgen::place_configured_feature(
-        feature_types,
-        &stone_column,
-        &mut world,
-        world::BlockPos(38, 2, 8),
-    );
-    worldgen::place_configured_feature(
-        feature_types,
-        &stone_column,
-        &mut world,
-        world::BlockPos(2, 2, 2),
-    );
-    place_ao_test_structure(&mut world, world::BlockPos(12, 2, 2));
-    for x in 8..12 {
-        let z = world.seeded_range(x, 6, 2, 3, 7);
-        let height = world.seeded_range(x, z, 3, 2, 4);
-        for y in 2..=height {
-            world.set_block(world::BlockPos(x, y, z), id("stone"));
-        }
-    }
-    for x in 10..14 {
-        for z in 10..14 {
-            world.set_block(world::BlockPos(x, 1, z), id("sand"));
-        }
-    }
-    for x in 10..14 {
-        for z in 4..8 {
-            world.set_block(world::BlockPos(x, 1, z), id("glass"));
-        }
-    }
-    for x in 4..8 {
-        for z in 10..14 {
-            world.set_block(world::BlockPos(x, 1, z), id("oak_planks"));
-        }
-    }
-    for x in 1..5 {
-        for z in 10..14 {
-            world.set_block(world::BlockPos(x, 1, z), id("water"));
-        }
-    }
-    let oak_tree = worldgen::ConfiguredFeature {
-        feature_type: id::NamespacedId::ferrumcraft("tree").expect("valid feature type ID"),
-        config: worldgen::FeatureConfig::SimpleTree {
-            log: id("oak_log"),
-            leaves: id("oak_leaves"),
-            trunk_height: 2,
-        },
-    };
-    worldgen::place_configured_feature(
-        feature_types,
-        &oak_tree,
-        &mut world,
-        world::BlockPos(5, 2, 5),
-    );
 
     world
-}
-
-fn place_ao_test_structure(world: &mut world::World, origin: world::BlockPos) {
-    let stone = block::BlockId("stone".to_string());
-    for x in 0..3 {
-        world.set_block(
-            world::BlockPos(origin.0 + x, origin.1, origin.2),
-            stone.clone(),
-        );
-        world.set_block(
-            world::BlockPos(origin.0 + x, origin.1 + 1, origin.2),
-            stone.clone(),
-        );
-    }
-    for z in 0..3 {
-        world.set_block(
-            world::BlockPos(origin.0, origin.1, origin.2 + z),
-            stone.clone(),
-        );
-        world.set_block(
-            world::BlockPos(origin.0, origin.1 + 1, origin.2 + z),
-            stone.clone(),
-        );
-    }
-    for y in 0..3 {
-        world.set_block(
-            world::BlockPos(origin.0 + 2, origin.1 + y, origin.2 + 2),
-            stone.clone(),
-        );
-        world.set_block(
-            world::BlockPos(origin.0 + 1, origin.1 + y, origin.2 + 2),
-            stone.clone(),
-        );
-        world.set_block(
-            world::BlockPos(origin.0 + 2, origin.1 + y, origin.2 + 1),
-            stone.clone(),
-        );
-    }
-    world.set_block(
-        world::BlockPos(origin.0 + 1, origin.1 + 2, origin.2),
-        stone.clone(),
-    );
-    world.set_block(world::BlockPos(origin.0, origin.1 + 2, origin.2 + 1), stone);
 }
 
 fn save_path() -> PathBuf {
@@ -2120,7 +2013,7 @@ fn main() {
         }
     };
 
-    // Create a demo world and place some blocks.
+    // Create the initial generated world around spawn.
     let mut world = create_demo_world(
         &worldgen_feature_types,
         &structure_sets,
@@ -2129,16 +2022,6 @@ fn main() {
     );
     log::info!(target: "world", "Demo world seed: {}", world.seed());
     log::info!(target: "worldgen", "Demo noise settings: {:?}", noise_settings);
-    if let Some(def) = block_registry
-        .iter()
-        .find(|(id, _)| id.path() == "oak_log")
-        .map(|(_, d)| d)
-    {
-        world.set_block_property(world::BlockPos(5, 2, 5), 0, 1);
-        log::info!(target: "world", "Log axis = {}, properties: {:?}",
-            def.properties[0].values[world.get_block_property(world::BlockPos(5, 2, 5), 0) as usize],
-            def.properties);
-    }
     log::info!(target: "world", "Directions: north={}, south={}, west={}, east={}, up={}, down={}",
         block::direction::NORTH,
         block::direction::SOUTH,
