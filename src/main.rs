@@ -84,6 +84,7 @@ const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
 const WATER_FALLING_LEVEL: u8 = 8;
 const WATER_MAX_LEVEL: u8 = 15;
 const WATER_SOURCE_SEARCH_LIMIT: usize = 7;
+const WATER_SLOPE_FIND_DISTANCE: usize = 4;
 const WATER_FLOW_DELAY_TICKS: u64 = 5;
 const WATER_UPDATES_PER_TICK: usize = 128;
 
@@ -1052,15 +1053,81 @@ impl App {
 
         let next_level = spread_level + 1;
         let mut changed = false;
-        for neighbor in horizontal_neighbors(pos) {
-            if self.can_water_replace(neighbor, next_level) {
-                self.set_water_level(neighbor, next_level);
-                self.queue_block_update_meshes(neighbor);
-                self.queue_water_updates_near(neighbor);
-                changed = true;
-            }
+        for target in self.water_spread_targets(pos, next_level) {
+            self.set_water_level(target, next_level);
+            self.queue_block_update_meshes(target);
+            self.queue_water_updates_near(target);
+            changed = true;
         }
         changed
+    }
+
+    fn water_spread_targets(
+        &self,
+        source: world::BlockPos,
+        next_level: u8,
+    ) -> Vec<world::BlockPos> {
+        let candidates: Vec<_> = horizontal_neighbors(source)
+            .into_iter()
+            .filter(|candidate| self.can_water_replace(*candidate, next_level))
+            .collect();
+        let mut best_distance = usize::MAX;
+        let mut targets = Vec::new();
+
+        for candidate in candidates {
+            let distance = self
+                .water_distance_to_drop(candidate, source, next_level)
+                .unwrap_or(usize::MAX);
+            if distance < best_distance {
+                best_distance = distance;
+                targets.clear();
+            }
+            if distance == best_distance {
+                targets.push(candidate);
+            }
+        }
+
+        targets
+    }
+
+    fn water_distance_to_drop(
+        &self,
+        start: world::BlockPos,
+        source: world::BlockPos,
+        next_level: u8,
+    ) -> Option<usize> {
+        if self.water_can_fall_from(start) {
+            return Some(0);
+        }
+
+        let mut queue = VecDeque::from([(start, 0usize)]);
+        let mut visited = HashSet::from([source, start]);
+        while let Some((current, distance)) = queue.pop_front() {
+            if distance >= WATER_SLOPE_FIND_DISTANCE {
+                continue;
+            }
+
+            for neighbor in horizontal_neighbors(current) {
+                if !visited.insert(neighbor) || !self.can_water_replace(neighbor, next_level) {
+                    continue;
+                }
+                let next_distance = distance + 1;
+                if self.water_can_fall_from(neighbor) {
+                    return Some(next_distance);
+                }
+                queue.push_back((neighbor, next_distance));
+            }
+        }
+
+        None
+    }
+
+    fn water_can_fall_from(&self, pos: world::BlockPos) -> bool {
+        pos.1 > 0
+            && self.can_water_replace(
+                world::BlockPos(pos.0, pos.1 - 1, pos.2),
+                WATER_FALLING_LEVEL,
+            )
     }
 
     fn recomputed_water_level(&self, pos: world::BlockPos) -> Option<u8> {
