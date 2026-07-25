@@ -58,6 +58,8 @@ const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
 const PLAYER_CROUCH_EYE_HEIGHT: f32 = 1.35;
 const PLAYER_RADIUS: f32 = 0.3;
+const BLOCK_REACH: f32 = 5.0;
+const BLOCK_RAY_STEP: f32 = 0.05;
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
@@ -120,6 +122,12 @@ struct MeshJob {
 struct GeneratedMesh {
     pos: world::ChunkPos,
     mesh: mesher::MeshData,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BlockTarget {
+    block_pos: world::BlockPos,
+    place_pos: world::BlockPos,
 }
 
 impl ApplicationHandler for App {
@@ -316,6 +324,7 @@ impl ApplicationHandler for App {
         self.last_frame_update = now;
 
         self.update_player_movement(frame_dt);
+        self.handle_block_interaction();
         self.run_fixed_updates();
 
         if let Some(window) = &self.window {
@@ -632,6 +641,52 @@ impl App {
         if let Some(window) = &self.window {
             window.set_pointer_locked(locked);
         }
+    }
+
+    fn handle_block_interaction(&mut self) {
+        if !self.pointer_locked {
+            return;
+        }
+
+        let Some(target) = self.targeted_block() else {
+            return;
+        };
+
+        if self.input.was_mouse_button_just_pressed(MouseButton::Left) {
+            self.world
+                .set_block(target.block_pos, block::BlockId::AIR.clone());
+            self.queue_block_update_meshes(target.block_pos);
+        }
+
+        if self.input.was_mouse_button_just_pressed(MouseButton::Right) {
+            let previous = self.world.get_block(target.place_pos);
+            if matches!(previous.0.as_str(), "" | "water") {
+                self.world
+                    .set_block(target.place_pos, block::BlockId("dirt".to_string()));
+                let collides = self.camera.as_ref().is_some_and(|camera| {
+                    player_collides(
+                        &self.world,
+                        camera.position(),
+                        self.input.is_shift_pressed(),
+                    )
+                });
+                if collides {
+                    self.world.set_block(target.place_pos, previous);
+                } else {
+                    self.queue_block_update_meshes(target.place_pos);
+                }
+            }
+        }
+    }
+
+    fn targeted_block(&self) -> Option<BlockTarget> {
+        let camera = self.camera.as_ref()?;
+        raycast_block(&self.world, camera.position(), camera.forward())
+    }
+
+    fn queue_block_update_meshes(&mut self, block_pos: world::BlockPos) {
+        let chunk_pos = block_pos.chunk_pos();
+        self.queue_chunk_meshes_near(chunk_pos);
     }
 
     fn adjust_render_distance(&mut self, delta: i32) {
@@ -1274,6 +1329,30 @@ fn spawn_eye_position(world: &world::World) -> Vec3 {
     )
 }
 
+fn raycast_block(world: &world::World, origin: Vec3, direction: Vec3) -> Option<BlockTarget> {
+    let direction = direction.try_normalize()?;
+    let mut previous = camera_block_pos(origin);
+    let mut distance = 0.0;
+
+    while distance <= BLOCK_REACH {
+        let sample = origin + direction * distance;
+        let block_pos = camera_block_pos(sample);
+        let block = world.get_block(block_pos);
+        if is_targetable_block(&block) {
+            return Some(BlockTarget {
+                block_pos,
+                place_pos: previous,
+            });
+        }
+        if block_pos != previous {
+            previous = block_pos;
+        }
+        distance += BLOCK_RAY_STEP;
+    }
+
+    None
+}
+
 fn player_move_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
     let mut movement = Vec3::ZERO;
 
@@ -1364,6 +1443,10 @@ fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) ->
 
 fn is_player_solid_block(block: &block::BlockId) -> bool {
     !matches!(block.0.as_str(), "" | "water" | "oak_leaves")
+}
+
+fn is_targetable_block(block: &block::BlockId) -> bool {
+    !matches!(block.0.as_str(), "" | "water")
 }
 
 fn main() {

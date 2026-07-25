@@ -15,6 +15,7 @@ pub struct InputState {
     pressed_keys: HashSet<KeyCode>,
     just_pressed_keys: HashSet<KeyCode>,
     pressed_mouse_buttons: HashSet<MouseButton>,
+    just_pressed_mouse_buttons: HashSet<MouseButton>,
     cursor_position: Option<(f64, f64)>,
     cursor_delta: (f64, f64),
     debug_overlay_toggle_requested: bool,
@@ -56,6 +57,9 @@ impl InputState {
             }
             WindowEvent::MouseInput { state, button, .. } => match state {
                 ElementState::Pressed => {
+                    if !self.pressed_mouse_buttons.contains(button) {
+                        self.just_pressed_mouse_buttons.insert(*button);
+                    }
                     self.pressed_mouse_buttons.insert(*button);
                 }
                 ElementState::Released => {
@@ -119,6 +123,11 @@ impl InputState {
         self.pressed_mouse_buttons.contains(&button)
     }
 
+    /// Returns whether a mouse button was pressed during this frame.
+    pub fn was_mouse_button_just_pressed(&self, button: MouseButton) -> bool {
+        self.just_pressed_mouse_buttons.contains(&button)
+    }
+
     /// Cursor movement accumulated since the last frame boundary.
     #[allow(dead_code)]
     pub fn cursor_delta(&self) -> (f64, f64) {
@@ -135,12 +144,14 @@ impl InputState {
     /// Resets frame-local input data while preserving held buttons and keys.
     pub fn end_frame(&mut self) {
         self.just_pressed_keys.clear();
+        self.just_pressed_mouse_buttons.clear();
         self.debug_overlay_toggle_requested = false;
     }
 
     fn clear(&mut self) {
         self.pressed_keys.clear();
         self.just_pressed_keys.clear();
+        self.just_pressed_mouse_buttons.clear();
         self.pressed_mouse_buttons.clear();
         self.debug_overlay_toggle_requested = false;
         self.f3_chord_pressed = false;
