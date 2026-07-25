@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 /// Input state accumulated from window events.
@@ -19,6 +19,7 @@ pub struct InputState {
     pending_mouse_clicks: HashSet<MouseButton>,
     cursor_position: Option<(f64, f64)>,
     cursor_delta: (f64, f64),
+    scroll_delta: f32,
     debug_overlay_toggle_requested: bool,
     f3_chord_pressed: bool,
 }
@@ -75,6 +76,12 @@ impl InputState {
                     self.cursor_delta.1 += next.1 - previous.1;
                 }
                 self.cursor_position = Some(next);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.scroll_delta += match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y,
+                    MouseScrollDelta::PixelDelta(position) => position.y as f32 / 32.0,
+                };
             }
             WindowEvent::Focused(false) => self.clear(),
             _ => {}
@@ -157,6 +164,13 @@ impl InputState {
         self.pending_mouse_clicks.clear();
     }
 
+    /// Returns and clears accumulated scroll wheel movement.
+    pub fn take_scroll_delta(&mut self) -> f32 {
+        let delta = self.scroll_delta;
+        self.scroll_delta = 0.0;
+        delta
+    }
+
     /// Returns and clears accumulated cursor movement.
     pub fn take_cursor_delta(&mut self) -> (f64, f64) {
         let delta = self.cursor_delta;
@@ -169,6 +183,7 @@ impl InputState {
         self.just_pressed_keys.clear();
         self.just_pressed_mouse_buttons.clear();
         self.debug_overlay_toggle_requested = false;
+        self.scroll_delta = 0.0;
     }
 
     fn clear(&mut self) {
@@ -180,5 +195,6 @@ impl InputState {
         self.debug_overlay_toggle_requested = false;
         self.f3_chord_pressed = false;
         self.cursor_delta = (0.0, 0.0);
+        self.scroll_delta = 0.0;
     }
 }

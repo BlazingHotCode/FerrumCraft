@@ -350,7 +350,7 @@ impl OverlayRenderer {
         pass.draw(0..vertices.len() as u32, 0..1);
     }
 
-    /// Draws a compact five-slot hotbar at the bottom center.
+    /// Draws a Minecraft-style nine-slot hotbar at the bottom center.
     pub fn encode_hotbar(
         &self,
         device: &wgpu::Device,
@@ -359,19 +359,19 @@ impl OverlayRenderer {
         width: u32,
         height: u32,
         selected: usize,
-        items: [Option<usize>; 5],
-        counts: [u32; 5],
+        items: [Option<usize>; 9],
+        counts: [u32; 9],
     ) {
         let width = width.max(1) as f32;
         let height = height.max(1) as f32;
         let slot = 42.0;
         let gap = 4.0;
-        let total_width = slot * 5.0 + gap * 4.0;
+        let total_width = slot * 9.0 + gap * 8.0;
         let left = width * 0.5 - total_width * 0.5;
         let top = height - slot - 18.0;
-        let mut vertices = Vec::with_capacity(5 * 18);
+        let mut vertices = Vec::with_capacity(9 * 18);
 
-        for i in 0..5 {
+        for i in 0..9 {
             let x = left + i as f32 * (slot + gap);
             let border = if i == selected {
                 [1.0, 1.0, 1.0, 0.95]
@@ -436,8 +436,8 @@ impl OverlayRenderer {
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
-        hotbar_items: [Option<usize>; 5],
-        hotbar_counts: [u32; 5],
+        hotbar_items: [Option<usize>; 9],
+        hotbar_counts: [u32; 9],
         inventory_items: [Option<usize>; 27],
         inventory_counts: [u32; 27],
         carried_item: Option<usize>,
@@ -482,9 +482,9 @@ impl OverlayRenderer {
             }
         }
 
-        let hotbar_left = width * 0.5 - (slot * 5.0 + gap * 4.0) * 0.5;
+        let hotbar_left = width * 0.5 - (slot * 9.0 + gap * 8.0) * 0.5;
         let hotbar_top = top + 3.0 * (slot + gap) + 20.0;
-        for col in 0..5 {
+        for col in 0..9 {
             let x = hotbar_left + col as f32 * (slot + gap);
             draw_inventory_slot(&mut vertices, x, hotbar_top, slot, width, height);
             draw_slot_stack(

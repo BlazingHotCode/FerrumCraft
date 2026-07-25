@@ -62,7 +62,8 @@ const PLAYER_RADIUS: f32 = 0.3;
 const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
 const HOTBAR_BLOCKS: [&str; 5] = ["dirt", "stone", "oak_log", "oak_planks", "glass"];
-const HOTBAR_SIZE: usize = HOTBAR_BLOCKS.len();
+const HOTBAR_SIZE: usize = 9;
+const ITEM_TYPE_COUNT: usize = HOTBAR_BLOCKS.len();
 const INVENTORY_SIZE: usize = 27;
 const MAX_STACK_SIZE: u32 = 64;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
@@ -169,11 +170,11 @@ struct SavePlayer {
     position: [f32; 3],
     hotbar_selected: usize,
     #[serde(default)]
-    hotbar_counts: [u32; HOTBAR_SIZE],
+    hotbar_counts: Vec<u32>,
     #[serde(default)]
-    hotbar_slots: [InventorySlot; HOTBAR_SIZE],
+    hotbar_slots: Vec<InventorySlot>,
     #[serde(default)]
-    inventory_slots: [InventorySlot; INVENTORY_SIZE],
+    inventory_slots: Vec<InventorySlot>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -297,6 +298,7 @@ impl ApplicationHandler for App {
         }
         if !self.inventory_open {
             self.update_hotbar_selection();
+            self.update_hotbar_scroll();
         }
 
         match event {
@@ -828,6 +830,10 @@ impl App {
             KeyCode::Digit3,
             KeyCode::Digit4,
             KeyCode::Digit5,
+            KeyCode::Digit6,
+            KeyCode::Digit7,
+            KeyCode::Digit8,
+            KeyCode::Digit9,
         ]
         .into_iter()
         .enumerate()
@@ -835,6 +841,15 @@ impl App {
             if self.input.was_key_just_pressed(key) {
                 self.hotbar_selected = index;
             }
+        }
+    }
+
+    fn update_hotbar_scroll(&mut self) {
+        let scroll = self.input.take_scroll_delta();
+        if scroll > 0.0 {
+            self.hotbar_selected = (self.hotbar_selected + HOTBAR_SIZE - 1) % HOTBAR_SIZE;
+        } else if scroll < 0.0 {
+            self.hotbar_selected = (self.hotbar_selected + 1) % HOTBAR_SIZE;
         }
     }
 
@@ -1526,9 +1541,9 @@ fn save_game(
         player: SavePlayer {
             position: [player_position.x, player_position.y, player_position.z],
             hotbar_selected,
-            hotbar_counts: hotbar_counts_from_slots(&hotbar_slots),
-            hotbar_slots,
-            inventory_slots,
+            hotbar_counts: hotbar_counts_from_slots(&hotbar_slots).to_vec(),
+            hotbar_slots: hotbar_slots.to_vec(),
+            inventory_slots: inventory_slots.to_vec(),
         },
         chunks: world
             .persistent_chunks()
@@ -1661,19 +1676,49 @@ fn inventory_from_saved_player(
     [InventorySlot; HOTBAR_SIZE],
     [InventorySlot; INVENTORY_SIZE],
 ) {
-    let mut hotbar_slots = player.hotbar_slots;
+    let mut hotbar_slots = [InventorySlot::default(); HOTBAR_SIZE];
+    for (index, slot) in player
+        .hotbar_slots
+        .iter()
+        .copied()
+        .take(HOTBAR_SIZE)
+        .enumerate()
+    {
+        hotbar_slots[index] = sanitize_inventory_slot(slot);
+    }
     if hotbar_slots.iter().all(InventorySlot::is_empty) {
         for (index, count) in player.hotbar_counts.iter().copied().enumerate() {
-            if count > 0 {
+            if index < HOTBAR_SIZE && count > 0 {
                 hotbar_slots[index] = InventorySlot {
-                    item: Some(index),
+                    item: (index < ITEM_TYPE_COUNT).then_some(index),
                     count: count.min(MAX_STACK_SIZE),
                 };
             }
         }
     }
 
-    (hotbar_slots, player.inventory_slots)
+    let mut inventory_slots = [InventorySlot::default(); INVENTORY_SIZE];
+    for (index, slot) in player
+        .inventory_slots
+        .iter()
+        .copied()
+        .take(INVENTORY_SIZE)
+        .enumerate()
+    {
+        inventory_slots[index] = sanitize_inventory_slot(slot);
+    }
+
+    (hotbar_slots, inventory_slots)
+}
+
+fn sanitize_inventory_slot(slot: InventorySlot) -> InventorySlot {
+    match slot.item {
+        Some(item) if item < ITEM_TYPE_COUNT && slot.count > 0 => InventorySlot {
+            item: Some(item),
+            count: slot.count.min(MAX_STACK_SIZE),
+        },
+        _ => InventorySlot::default(),
+    }
 }
 
 fn add_item_to_inventory(
@@ -2113,7 +2158,7 @@ fn main() {
         .map(|player| Vec3::new(player.position[0], player.position[1], player.position[2]));
     let saved_hotbar_selected = saved_player
         .as_ref()
-        .map(|player| player.hotbar_selected.min(HOTBAR_BLOCKS.len() - 1))
+        .map(|player| player.hotbar_selected.min(HOTBAR_SIZE - 1))
         .unwrap_or(0);
     let (saved_hotbar_slots, saved_inventory_slots) = saved_player
         .as_ref()
