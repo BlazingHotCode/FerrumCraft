@@ -359,6 +359,7 @@ impl OverlayRenderer {
         width: u32,
         height: u32,
         selected: usize,
+        counts: [u32; 5],
     ) {
         let width = width.max(1) as f32;
         let height = height.max(1) as f32;
@@ -397,6 +398,35 @@ impl OverlayRenderer {
                 height,
                 hotbar_item_color(i),
             );
+            if counts[i] > 0 {
+                let text = counts[i].min(999).to_string();
+                let text_x = x + slot - 6.0 - text.len() as f32 * 12.0;
+                let text_y = top + slot - 14.0;
+                for (offset, ch) in text.chars().enumerate() {
+                    push_glyph(
+                        &mut vertices,
+                        &self.font,
+                        ch,
+                        text_x + offset as f32 * 12.0 + 1.0,
+                        text_y + 1.0,
+                        2.0,
+                        width,
+                        height,
+                        [0.0, 0.0, 0.0, 0.85],
+                    );
+                    push_glyph(
+                        &mut vertices,
+                        &self.font,
+                        ch,
+                        text_x + offset as f32 * 12.0,
+                        text_y,
+                        2.0,
+                        width,
+                        height,
+                        [1.0, 1.0, 1.0, 1.0],
+                    );
+                }
+            }
         }
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

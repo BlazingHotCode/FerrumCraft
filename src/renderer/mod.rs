@@ -162,6 +162,7 @@ impl Renderer {
         debug_text: Option<&str>,
         screen_tint: Option<[f32; 4]>,
         hotbar_selected: usize,
+        hotbar_counts: [u32; 5],
     ) -> Result<RenderStats, wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
 
@@ -202,6 +203,7 @@ impl Renderer {
             self.config.width,
             self.config.height,
             hotbar_selected,
+            hotbar_counts,
         );
 
         if let Some(text) = debug_text {

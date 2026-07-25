@@ -62,6 +62,7 @@ const PLAYER_RADIUS: f32 = 0.3;
 const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
 const HOTBAR_BLOCKS: [&str; 5] = ["dirt", "stone", "oak_log", "oak_planks", "glass"];
+const HOTBAR_SIZE: usize = HOTBAR_BLOCKS.len();
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
@@ -109,6 +110,7 @@ struct App {
     player_grounded: bool,
     player_crouching: bool,
     hotbar_selected: usize,
+    hotbar_counts: [u32; HOTBAR_SIZE],
     saved_player_position: Option<Vec3>,
     last_save: Instant,
     render_distance_chunks: i32,
@@ -148,6 +150,8 @@ struct SaveGame {
 struct SavePlayer {
     position: [f32; 3],
     hotbar_selected: usize,
+    #[serde(default)]
+    hotbar_counts: [u32; HOTBAR_SIZE],
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -310,8 +314,12 @@ impl ApplicationHandler for App {
                         .camera
                         .as_ref()
                         .and_then(|camera| camera_water_tint(&self.world, camera.position()));
-                    match renderer.render(debug_text.as_deref(), screen_tint, self.hotbar_selected)
-                    {
+                    match renderer.render(
+                        debug_text.as_deref(),
+                        screen_tint,
+                        self.hotbar_selected,
+                        self.hotbar_counts,
+                    ) {
                         Ok(stats) => {
                             self.debug_overlay
                                 .set_render_stats(stats.visible_meshes, stats.culled_meshes);
@@ -706,12 +714,19 @@ impl App {
         let place_requested = self.input.take_mouse_click(MouseButton::Right);
 
         if break_requested {
+            let broken_block = self.world.get_block(target.block_pos);
             self.world
                 .set_block(target.block_pos, block::BlockId::AIR.clone());
+            if let Some(slot) = hotbar_slot_for_block(&broken_block) {
+                self.hotbar_counts[slot] = self.hotbar_counts[slot].saturating_add(1).min(999);
+            }
             self.queue_block_update_meshes(target.block_pos);
         }
 
         if place_requested {
+            if self.hotbar_counts[self.hotbar_selected] == 0 {
+                return;
+            }
             let previous = self.world.get_block(target.place_pos);
             if matches!(previous.0.as_str(), "" | "water") {
                 self.world
@@ -722,6 +737,7 @@ impl App {
                 if collides {
                     self.world.set_block(target.place_pos, previous);
                 } else {
+                    self.hotbar_counts[self.hotbar_selected] -= 1;
                     self.queue_block_update_meshes(target.place_pos);
                 }
             }
@@ -764,7 +780,12 @@ impl App {
             return;
         };
 
-        match save_game(&self.world, camera.position(), self.hotbar_selected) {
+        match save_game(
+            &self.world,
+            camera.position(),
+            self.hotbar_selected,
+            self.hotbar_counts,
+        ) {
             Ok(()) => {
                 self.last_save = Instant::now();
                 log::info!(target: "save", "Saved world to {:?}", save_path());
@@ -1386,12 +1407,14 @@ fn save_game(
     world: &world::World,
     player_position: Vec3,
     hotbar_selected: usize,
+    hotbar_counts: [u32; HOTBAR_SIZE],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let save = SaveGame {
         seed: world.seed(),
         player: SavePlayer {
             position: [player_position.x, player_position.y, player_position.z],
             hotbar_selected,
+            hotbar_counts,
         },
         chunks: world
             .persistent_chunks()
@@ -1678,6 +1701,10 @@ fn is_targetable_block(block: &block::BlockId) -> bool {
     !matches!(block.0.as_str(), "" | "water")
 }
 
+fn hotbar_slot_for_block(block: &block::BlockId) -> Option<usize> {
+    HOTBAR_BLOCKS.iter().position(|id| block.0 == *id)
+}
+
 fn main() {
     logging::init().expect("Failed to initialize logger");
     log::info!(target: "startup", "FerrumCraft v{} initializing", env!("CARGO_PKG_VERSION"));
@@ -1818,6 +1845,10 @@ fn main() {
         .as_ref()
         .map(|player| player.hotbar_selected.min(HOTBAR_BLOCKS.len() - 1))
         .unwrap_or(0);
+    let saved_hotbar_counts = saved_player
+        .as_ref()
+        .map(|player| player.hotbar_counts)
+        .unwrap_or([0; HOTBAR_SIZE]);
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -1851,6 +1882,7 @@ fn main() {
         player_grounded: false,
         player_crouching: false,
         hotbar_selected: saved_hotbar_selected,
+        hotbar_counts: saved_hotbar_counts,
         saved_player_position,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
