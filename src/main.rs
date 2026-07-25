@@ -83,6 +83,7 @@ const WATER_SOURCE_LEVEL: u8 = 0;
 const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
 const WATER_FALLING_LEVEL: u8 = 8;
 const WATER_MAX_LEVEL: u8 = 15;
+const WATER_SOURCE_SEARCH_LIMIT: usize = 7;
 const WATER_UPDATES_PER_TICK: usize = 128;
 
 /// Top-level application state owned by the winit event loop.
@@ -1010,14 +1011,16 @@ impl App {
             return Some(WATER_SOURCE_LEVEL);
         }
 
-        let above = world::BlockPos(pos.0, pos.1 + 1, pos.2);
-        if pos.1 + 1 < world::CHUNK_SIZE_Y as i32 && self.world.get_block(above).0 == "water" {
+        if self.has_water_above(pos) {
             return Some(WATER_FALLING_LEVEL);
         }
 
         let mut best = None;
         for neighbor in horizontal_neighbors(pos) {
             if self.world.get_block(neighbor).0 != "water" {
+                continue;
+            }
+            if !self.water_connected_to_source(neighbor) {
                 continue;
             }
             let level = self.water_level(neighbor);
@@ -1042,6 +1045,46 @@ impl App {
             .take(2)
             .count()
             >= 2
+    }
+
+    fn water_connected_to_source(&self, pos: world::BlockPos) -> bool {
+        if self.world.get_block(pos).0 != "water" {
+            return false;
+        }
+        if self.water_level(pos) == WATER_SOURCE_LEVEL || self.has_water_above(pos) {
+            return true;
+        }
+
+        let mut queue = VecDeque::from([(pos, 0usize)]);
+        let mut visited = HashSet::from([pos]);
+        while let Some((current, distance)) = queue.pop_front() {
+            if distance >= WATER_SOURCE_SEARCH_LIMIT {
+                continue;
+            }
+
+            for neighbor in horizontal_neighbors(current) {
+                if !visited.insert(neighbor) || self.world.get_block(neighbor).0 != "water" {
+                    continue;
+                }
+                if self.water_level(neighbor) == WATER_SOURCE_LEVEL
+                    || self.has_water_above(neighbor)
+                {
+                    return true;
+                }
+                queue.push_back((neighbor, distance + 1));
+            }
+        }
+
+        false
+    }
+
+    fn has_water_above(&self, pos: world::BlockPos) -> bool {
+        pos.1 + 1 < world::CHUNK_SIZE_Y as i32
+            && self
+                .world
+                .get_block(world::BlockPos(pos.0, pos.1 + 1, pos.2))
+                .0
+                == "water"
     }
 
     fn can_water_replace(&self, pos: world::BlockPos, new_level: u8) -> bool {
