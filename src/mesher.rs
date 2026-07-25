@@ -38,18 +38,6 @@ fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Qua
     *off += 4;
 }
 
-fn random_rotation(path: &str, x: usize, y: usize, z: usize, face: Face) -> u8 {
-    if !matches!(path, "block/sand" | "block/dirt" | "block/grass_block_top") {
-        return 0;
-    }
-
-    let mut h = x as u32;
-    h = h.wrapping_mul(0x9E37_79B9) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
-    h ^= (z as u32).wrapping_mul(0xC2B2_AE35);
-    h ^= face as u32;
-    ((h ^ (h >> 16)) & 3) as u8
-}
-
 fn biome_tint(path: &str, biome: &str) -> [f32; 3] {
     let rgb = match (path, biome) {
         ("block/water_still", "desert") => [0x44, 0xaf, 0xd8],
@@ -172,12 +160,9 @@ fn face_uv<'a>(
     model: Option<&'a BlockModel>,
     atlas_uv: &HashMap<String, [f32; 4]>,
     face: Face,
-    x: usize,
-    y: usize,
-    z: usize,
-) -> ([f32; 4], u8, &'a str) {
+) -> ([f32; 4], &'a str) {
     let Some(model) = model else {
-        return ([0.0; 4], 0, "");
+        return ([0.0; 4], "");
     };
     let texture = model.texture(face);
     (
@@ -185,7 +170,6 @@ fn face_uv<'a>(
             .get(texture)
             .copied()
             .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-        random_rotation(texture, x, y, z, face),
         texture,
     )
 }
@@ -285,7 +269,7 @@ pub fn mesh_chunk(
 
                 // Right (+X)
                 if face_visible(block, block_at_world(world, world_x + 1, world_y, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Right, x, y, z);
+                    let (uv, texture) = face_uv(model, atlas_uv, Face::Right);
                     let ao = face_ao(world, world_x, world_y, world_z, 0);
                     let q = quad(
                         0,
@@ -294,7 +278,6 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         top_height,
-                        rotation,
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -311,7 +294,6 @@ pub fn mesh_chunk(
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
-                            0,
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -320,7 +302,7 @@ pub fn mesh_chunk(
                 }
                 // Left (-X)
                 if face_visible(block, block_at_world(world, world_x - 1, world_y, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Left, x, y, z);
+                    let (uv, texture) = face_uv(model, atlas_uv, Face::Left);
                     let ao = face_ao(world, world_x, world_y, world_z, 1);
                     let q = quad(
                         1,
@@ -329,7 +311,6 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         top_height,
-                        rotation,
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -346,7 +327,6 @@ pub fn mesh_chunk(
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
-                            0,
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -355,7 +335,7 @@ pub fn mesh_chunk(
                 }
                 // Top (+Y)
                 if face_visible(block, block_at_world(world, world_x, world_y + 1, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Top, x, y, z);
+                    let (uv, texture) = face_uv(model, atlas_uv, Face::Top);
                     let q = quad(
                         2,
                         fx,
@@ -363,7 +343,6 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         top_height,
-                        rotation,
                         face_ao(world, world_x, world_y, world_z, 2),
                         biome_tint(texture, biome),
                     );
@@ -371,7 +350,7 @@ pub fn mesh_chunk(
                 }
                 // Bottom (-Y)
                 if face_visible(block, block_at_world(world, world_x, world_y - 1, world_z)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Bottom, x, y, z);
+                    let (uv, texture) = face_uv(model, atlas_uv, Face::Bottom);
                     let q = quad(
                         3,
                         fx,
@@ -379,7 +358,6 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         top_height,
-                        rotation,
                         face_ao(world, world_x, world_y, world_z, 3),
                         biome_tint(texture, biome),
                     );
@@ -387,7 +365,7 @@ pub fn mesh_chunk(
                 }
                 // Front (+Z)
                 if face_visible(block, block_at_world(world, world_x, world_y, world_z + 1)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Front, x, y, z);
+                    let (uv, texture) = face_uv(model, atlas_uv, Face::Front);
                     let ao = face_ao(world, world_x, world_y, world_z, 4);
                     let q = quad(
                         4,
@@ -396,7 +374,6 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         top_height,
-                        rotation,
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -413,7 +390,6 @@ pub fn mesh_chunk(
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
-                            0,
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -422,7 +398,7 @@ pub fn mesh_chunk(
                 }
                 // Back (-Z)
                 if face_visible(block, block_at_world(world, world_x, world_y, world_z - 1)) {
-                    let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Back, x, y, z);
+                    let (uv, texture) = face_uv(model, atlas_uv, Face::Back);
                     let ao = face_ao(world, world_x, world_y, world_z, 5);
                     let q = quad(
                         5,
@@ -431,7 +407,6 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         top_height,
-                        rotation,
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -448,7 +423,6 @@ pub fn mesh_chunk(
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
                             top_height,
-                            0,
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -483,7 +457,6 @@ fn quad(
     oz: f32,
     uv: [f32; 4],
     top_height: f32,
-    rotation: u8,
     ao: [f32; 4],
     tint: [f32; 3],
 ) -> Quad {
@@ -555,8 +528,6 @@ fn quad(
         _ => unreachable!(),
     };
 
-    let uvs = rotate_uvs(uvs, rotation);
-
     Quad {
         vertices: [
             Vertex {
@@ -585,11 +556,4 @@ fn quad(
             },
         ],
     }
-}
-
-fn rotate_uvs(mut uvs: [[f32; 2]; 4], rotation: u8) -> [[f32; 2]; 4] {
-    for _ in 0..rotation {
-        uvs = [uvs[3], uvs[0], uvs[1], uvs[2]];
-    }
-    uvs
 }
