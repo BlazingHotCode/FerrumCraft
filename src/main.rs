@@ -743,6 +743,7 @@ impl App {
             self.player_velocity,
             dt,
             self.player_crouching,
+            self.player_grounded,
         );
         position = next_position;
         self.player_velocity = next_velocity;
@@ -1831,17 +1832,22 @@ fn move_player_with_collisions(
     mut velocity: Vec3,
     dt: f32,
     crouching: bool,
+    was_grounded: bool,
 ) -> (Vec3, Vec3, bool) {
     let mut grounded = false;
 
     position.x += velocity.x * dt;
-    if player_collides(world, position, crouching) {
+    if player_collides(world, position, crouching)
+        || (crouching && was_grounded && !player_has_ground_support(world, position, crouching))
+    {
         position.x -= velocity.x * dt;
         velocity.x = 0.0;
     }
 
     position.z += velocity.z * dt;
-    if player_collides(world, position, crouching) {
+    if player_collides(world, position, crouching)
+        || (crouching && was_grounded && !player_has_ground_support(world, position, crouching))
+    {
         position.z -= velocity.z * dt;
         velocity.z = 0.0;
     }
@@ -1861,6 +1867,11 @@ fn move_player_with_collisions(
     }
 
     (position, velocity, grounded)
+}
+
+fn player_has_ground_support(world: &world::World, eye_position: Vec3, crouching: bool) -> bool {
+    let probe = eye_position - Vec3::Y * 0.08;
+    player_collides(world, probe, crouching)
 }
 
 fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) -> bool {
