@@ -16,6 +16,7 @@ pub struct InputState {
     just_pressed_keys: HashSet<KeyCode>,
     pressed_mouse_buttons: HashSet<MouseButton>,
     just_pressed_mouse_buttons: HashSet<MouseButton>,
+    pending_mouse_clicks: HashSet<MouseButton>,
     cursor_position: Option<(f64, f64)>,
     cursor_delta: (f64, f64),
     debug_overlay_toggle_requested: bool,
@@ -59,6 +60,7 @@ impl InputState {
                 ElementState::Pressed => {
                     if !self.pressed_mouse_buttons.contains(button) {
                         self.just_pressed_mouse_buttons.insert(*button);
+                        self.pending_mouse_clicks.insert(*button);
                     }
                     self.pressed_mouse_buttons.insert(*button);
                 }
@@ -128,6 +130,11 @@ impl InputState {
         self.just_pressed_mouse_buttons.contains(&button)
     }
 
+    /// Consumes a mouse click request after gameplay has handled it.
+    pub fn take_mouse_click(&mut self, button: MouseButton) -> bool {
+        self.pending_mouse_clicks.remove(&button)
+    }
+
     /// Cursor movement accumulated since the last frame boundary.
     #[allow(dead_code)]
     pub fn cursor_delta(&self) -> (f64, f64) {
@@ -152,6 +159,7 @@ impl InputState {
         self.pressed_keys.clear();
         self.just_pressed_keys.clear();
         self.just_pressed_mouse_buttons.clear();
+        self.pending_mouse_clicks.clear();
         self.pressed_mouse_buttons.clear();
         self.debug_overlay_toggle_requested = false;
         self.f3_chord_pressed = false;

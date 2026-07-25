@@ -246,7 +246,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput {
                 state: winit::event::ElementState::Pressed,
-                button: MouseButton::Left,
+                button: MouseButton::Left | MouseButton::Right,
                 ..
             } => {
                 self.set_pointer_locked(true);
@@ -656,13 +656,16 @@ impl App {
             return;
         };
 
-        if self.input.was_mouse_button_just_pressed(MouseButton::Left) {
+        let break_requested = self.input.take_mouse_click(MouseButton::Left);
+        let place_requested = self.input.take_mouse_click(MouseButton::Right);
+
+        if break_requested {
             self.world
                 .set_block(target.block_pos, block::BlockId::AIR.clone());
             self.queue_block_update_meshes(target.block_pos);
         }
 
-        if self.input.was_mouse_button_just_pressed(MouseButton::Right) {
+        if place_requested {
             let previous = self.world.get_block(target.place_pos);
             if matches!(previous.0.as_str(), "" | "water") {
                 self.world
