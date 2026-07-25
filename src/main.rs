@@ -116,6 +116,7 @@ struct App {
     inventory_slots: [InventorySlot; INVENTORY_SIZE],
     carried_slot: InventorySlot,
     inventory_open: bool,
+    inventory_toggle_held: bool,
     saved_player_position: Option<Vec3>,
     last_save: Instant,
     render_distance_chunks: i32,
@@ -294,9 +295,6 @@ impl ApplicationHandler for App {
             let delta = if self.input.is_shift_pressed() { -1 } else { 1 };
             self.adjust_render_distance(delta);
         }
-        if self.input.was_key_just_pressed(KeyCode::KeyE) {
-            self.toggle_inventory();
-        }
         if !self.inventory_open {
             self.update_hotbar_selection();
         }
@@ -308,6 +306,24 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(false) => {
                 self.set_pointer_locked(false);
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if matches!(
+                    event.physical_key,
+                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyE)
+                ) && event.state == winit::event::ElementState::Pressed
+                    && !self.inventory_toggle_held =>
+            {
+                self.inventory_toggle_held = true;
+                self.toggle_inventory();
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if matches!(
+                    event.physical_key,
+                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyE)
+                ) && event.state == winit::event::ElementState::Released =>
+            {
+                self.inventory_toggle_held = false;
             }
             WindowEvent::KeyboardInput { .. }
                 if self
@@ -2140,6 +2156,7 @@ fn main() {
         inventory_slots: saved_inventory_slots,
         carried_slot: InventorySlot::default(),
         inventory_open: false,
+        inventory_toggle_held: false,
         saved_player_position,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
