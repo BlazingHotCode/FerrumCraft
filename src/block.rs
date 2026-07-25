@@ -211,6 +211,10 @@ pub mod direction {
 
 const AXIS_VALUES: &[&str] = &["y", "x", "z"];
 const LOG_PROPERTIES: &[PropertySchema] = &[PropertySchema::new("axis", AXIS_VALUES)];
+const WATER_LEVEL_VALUES: &[&str] = &[
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+];
+const WATER_PROPERTIES: &[PropertySchema] = &[PropertySchema::new("level", WATER_LEVEL_VALUES)];
 
 /// Facing property: `["north", "south", "west", "east", "up", "down"]`.
 /// Index 0 = north (-Z), 1 = south (+Z), 2 = west (-X), 3 = east (+X), 4 = up (+Y), 5 = down (-Y).
@@ -256,7 +260,7 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
                     c.required_tool_tier = ToolTier::Wood;
                     c
                 },
-                &[],
+                WATER_PROPERTIES,
             ),
         ),
         (

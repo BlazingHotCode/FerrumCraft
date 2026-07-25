@@ -14,6 +14,8 @@ const SY: usize = 64;
 const SZ: usize = 16;
 const SLICE: usize = SX * SZ;
 const LOWERED_WATER_HEIGHT: f32 = 14.0 / 16.0;
+const WATER_LEVEL_PROPERTY: u8 = 0;
+const WATER_FALLING_LEVEL: u8 = 8;
 
 fn is_transparent(b: &BlockId) -> bool {
     matches!(b.0.as_str(), "water" | "glass" | "oak_leaves")
@@ -262,7 +264,19 @@ pub fn mesh_chunk(
                 let biome = biome_cache[z * SX + x].as_str();
                 let top_height =
                     if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
-                        LOWERED_WATER_HEIGHT
+                        let level = world
+                            .get_block_property(
+                                crate::world::BlockPos(world_x, world_y, world_z),
+                                WATER_LEVEL_PROPERTY,
+                            )
+                            .min(15);
+                        if level == 0 {
+                            LOWERED_WATER_HEIGHT
+                        } else if level >= WATER_FALLING_LEVEL {
+                            1.0
+                        } else {
+                            ((8 - level) as f32 / 8.0).max(1.0 / 8.0)
+                        }
                     } else {
                         1.0
                     };

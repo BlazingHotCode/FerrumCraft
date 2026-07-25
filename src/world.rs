@@ -72,7 +72,9 @@ impl Chunk {
 
     /// Sets the block at local coordinates and marks the chunk dirty.
     pub fn set_block(&mut self, x: usize, y: usize, z: usize, id: BlockId) {
-        self.blocks[Self::index(x, y, z)] = id;
+        let idx = Self::index(x, y, z);
+        self.blocks[idx] = id;
+        self.properties.remove(&idx);
         self.dirty = true;
     }
 
@@ -115,11 +117,20 @@ impl Chunk {
     /// Sets a block property value at the given local position.
     pub fn set_property(&mut self, x: usize, y: usize, z: usize, prop_idx: u8, value_idx: u8) {
         let idx = Self::index(x, y, z);
-        self.properties
-            .entry(idx)
-            .or_default()
-            .push((prop_idx, value_idx));
+        let props = self.properties.entry(idx).or_default();
+        if let Some((_, value)) = props.iter_mut().find(|(prop, _)| *prop == prop_idx) {
+            *value = value_idx;
+        } else {
+            props.push((prop_idx, value_idx));
+        }
         self.dirty = true;
+    }
+
+    /// Returns saved property overrides as flat block indices with property/value pairs.
+    pub fn property_overrides(&self) -> impl Iterator<Item = (usize, &[(u8, u8)])> {
+        self.properties
+            .iter()
+            .map(|(idx, props)| (*idx, props.as_slice()))
     }
 }
 

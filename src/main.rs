@@ -78,6 +78,12 @@ const GENERATED_MESHES_INTEGRATED_PER_TICK: usize = 1;
 const CHUNK_MESH_REBUILDS_PER_TICK: usize = 1;
 const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const WORLD_RENDER_OFFSET: f32 = 8.5;
+const WATER_LEVEL_PROPERTY: u8 = 0;
+const WATER_SOURCE_LEVEL: u8 = 0;
+const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
+const WATER_FALLING_LEVEL: u8 = 8;
+const WATER_MAX_LEVEL: u8 = 15;
+const WATER_UPDATES_PER_TICK: usize = 128;
 
 /// Top-level application state owned by the winit event loop.
 ///
@@ -124,6 +130,8 @@ struct App {
     last_save: Instant,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
+    pending_water_updates: VecDeque<world::BlockPos>,
+    queued_water_updates: HashSet<world::BlockPos>,
 }
 
 struct GeneratedChunk {
@@ -183,12 +191,21 @@ struct SavePlayer {
 struct SaveChunk {
     pos: world::ChunkPos,
     runs: Vec<SaveBlockRun>,
+    #[serde(default)]
+    properties: Vec<SaveBlockProperty>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct SaveBlockRun {
     block: block::BlockId,
     len: usize,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SaveBlockProperty {
+    index: usize,
+    prop: u8,
+    value: u8,
 }
 
 enum InventorySlotTarget {
@@ -495,13 +512,15 @@ impl App {
         if let Some(position) = camera_position {
             self.update_debug_biome(position);
             let center_chunk = camera_chunk_pos(position);
+            let water_changed = self.process_water_updates();
             let integrated = self.integrate_generated_chunks();
             let integrated_meshes = self.integrate_generated_meshes(center_chunk);
             let rebuilt = self.process_pending_mesh_rebuilds(center_chunk);
             let generated = self.generate_missing_chunks_around(center_chunk);
             let unloaded = self.unload_far_chunks(center_chunk);
             self.remove_chunk_meshes_outside_render_distance(center_chunk);
-            if integrated > 0
+            if water_changed > 0
+                || integrated > 0
                 || integrated_meshes > 0
                 || rebuilt > 0
                 || generated > 0
@@ -804,6 +823,10 @@ impl App {
                 return;
             };
             let previous = self.world.get_block(target.place_pos);
+            let previous_water_level = (previous.0 == "water").then(|| {
+                self.world
+                    .get_block_property(target.place_pos, WATER_LEVEL_PROPERTY)
+            });
             if matches!(previous.0.as_str(), "" | "water") {
                 self.world.set_block(
                     target.place_pos,
@@ -814,9 +837,17 @@ impl App {
                 });
                 if collides {
                     self.world.set_block(target.place_pos, previous);
+                    if let Some(level) = previous_water_level {
+                        self.world.set_block_property(
+                            target.place_pos,
+                            WATER_LEVEL_PROPERTY,
+                            level,
+                        );
+                    }
                 } else {
                     remove_one_from_slot(&mut self.hotbar_slots[self.hotbar_selected]);
                     self.queue_block_update_meshes(target.place_pos);
+                    self.queue_water_updates_near(target.place_pos);
                 }
             }
         }
@@ -847,6 +878,7 @@ impl App {
             add_item_to_inventory(&mut self.hotbar_slots, &mut self.inventory_slots, item, 1);
         }
         self.queue_block_update_meshes(block_pos);
+        self.queue_water_updates_near(block_pos);
         self.reset_mining();
     }
 
@@ -863,6 +895,182 @@ impl App {
     fn queue_block_update_meshes(&mut self, block_pos: world::BlockPos) {
         let chunk_pos = block_pos.chunk_pos();
         self.queue_chunk_meshes_near(chunk_pos);
+    }
+
+    fn queue_water_update(&mut self, pos: world::BlockPos) {
+        if !(0..world::CHUNK_SIZE_Y as i32).contains(&pos.1)
+            || !self.world.is_chunk_loaded(pos.chunk_pos())
+        {
+            return;
+        }
+        if self.queued_water_updates.insert(pos) {
+            self.pending_water_updates.push_back(pos);
+        }
+    }
+
+    fn queue_water_updates_near(&mut self, pos: world::BlockPos) {
+        for update_pos in [
+            pos,
+            world::BlockPos(pos.0, pos.1 + 1, pos.2),
+            world::BlockPos(pos.0, pos.1 - 1, pos.2),
+            world::BlockPos(pos.0 + 1, pos.1, pos.2),
+            world::BlockPos(pos.0 - 1, pos.1, pos.2),
+            world::BlockPos(pos.0, pos.1, pos.2 + 1),
+            world::BlockPos(pos.0, pos.1, pos.2 - 1),
+        ] {
+            self.queue_water_update(update_pos);
+        }
+    }
+
+    fn process_water_updates(&mut self) -> usize {
+        let mut changed = 0;
+        for _ in 0..WATER_UPDATES_PER_TICK {
+            let Some(pos) = self.pending_water_updates.pop_front() else {
+                break;
+            };
+            self.queued_water_updates.remove(&pos);
+            if self.update_water_at(pos) {
+                changed += 1;
+            }
+        }
+        changed
+    }
+
+    fn update_water_at(&mut self, pos: world::BlockPos) -> bool {
+        let block = self.world.get_block(pos);
+        let current_level = if block.0 == "water" {
+            Some(self.water_level(pos))
+        } else {
+            None
+        };
+
+        let mut changed = false;
+        if let Some(level) = current_level {
+            if level != WATER_SOURCE_LEVEL {
+                if let Some(new_level) = self.recomputed_water_level(pos) {
+                    if new_level != level {
+                        self.set_water_level(pos, new_level);
+                        changed = true;
+                    }
+                } else {
+                    self.world.set_block(pos, block::BlockId::AIR.clone());
+                    changed = true;
+                }
+            }
+
+            if self.spread_water_from(pos) {
+                changed = true;
+            }
+        } else if self
+            .recomputed_water_level(pos)
+            .is_some_and(|level| self.can_water_replace(pos, level))
+        {
+            let level = self.recomputed_water_level(pos).unwrap();
+            self.set_water_level(pos, level);
+            changed = true;
+        }
+
+        if changed {
+            self.queue_block_update_meshes(pos);
+            self.queue_water_updates_near(pos);
+        }
+        changed
+    }
+
+    fn spread_water_from(&mut self, pos: world::BlockPos) -> bool {
+        let level = self.water_level(pos);
+        let below = world::BlockPos(pos.0, pos.1 - 1, pos.2);
+        if pos.1 > 0 && self.can_water_replace(below, WATER_FALLING_LEVEL) {
+            self.set_water_level(below, WATER_FALLING_LEVEL);
+            self.queue_block_update_meshes(below);
+            self.queue_water_updates_near(below);
+            return true;
+        }
+
+        let spread_level = water_spread_level(level);
+        if spread_level >= WATER_MAX_HORIZONTAL_LEVEL {
+            return false;
+        }
+
+        let next_level = spread_level + 1;
+        let mut changed = false;
+        for neighbor in horizontal_neighbors(pos) {
+            if self.can_water_replace(neighbor, next_level) {
+                self.set_water_level(neighbor, next_level);
+                self.queue_block_update_meshes(neighbor);
+                self.queue_water_updates_near(neighbor);
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn recomputed_water_level(&self, pos: world::BlockPos) -> Option<u8> {
+        let above = world::BlockPos(pos.0, pos.1 + 1, pos.2);
+        if pos.1 + 1 < world::CHUNK_SIZE_Y as i32 && self.world.get_block(above).0 == "water" {
+            return Some(WATER_FALLING_LEVEL);
+        }
+
+        let mut best = None;
+        let mut sources = 0;
+        for neighbor in horizontal_neighbors(pos) {
+            if self.world.get_block(neighbor).0 != "water" {
+                continue;
+            }
+            let level = self.water_level(neighbor);
+            if level == WATER_SOURCE_LEVEL {
+                sources += 1;
+            }
+            let spread_level = water_spread_level(level);
+            if spread_level < WATER_MAX_HORIZONTAL_LEVEL {
+                best = Some(best.map_or(spread_level + 1, |current: u8| {
+                    current.min(spread_level + 1)
+                }));
+            }
+        }
+
+        if sources >= 2 && self.is_water_supported(pos) {
+            Some(WATER_SOURCE_LEVEL)
+        } else {
+            best
+        }
+    }
+
+    fn can_water_replace(&self, pos: world::BlockPos, new_level: u8) -> bool {
+        if !(0..world::CHUNK_SIZE_Y as i32).contains(&pos.1)
+            || !self.world.is_chunk_loaded(pos.chunk_pos())
+        {
+            return false;
+        }
+        let block = self.world.get_block(pos);
+        match block.0.as_str() {
+            "" => true,
+            "water" => self.world.get_block_property(pos, WATER_LEVEL_PROPERTY) > new_level,
+            _ => false,
+        }
+    }
+
+    fn is_water_supported(&self, pos: world::BlockPos) -> bool {
+        if pos.1 == 0 {
+            return true;
+        }
+        let below = self
+            .world
+            .get_block(world::BlockPos(pos.0, pos.1 - 1, pos.2));
+        !matches!(below.0.as_str(), "" | "water")
+    }
+
+    fn set_water_level(&mut self, pos: world::BlockPos, level: u8) {
+        self.world
+            .set_block(pos, block::BlockId("water".to_string()));
+        self.world
+            .set_block_property(pos, WATER_LEVEL_PROPERTY, level.min(WATER_MAX_LEVEL));
+    }
+
+    fn water_level(&self, pos: world::BlockPos) -> u8 {
+        self.world
+            .get_block_property(pos, WATER_LEVEL_PROPERTY)
+            .min(WATER_MAX_LEVEL)
     }
 
     fn update_hotbar_selection(&mut self) {
@@ -1226,6 +1434,23 @@ fn camera_block_pos(position: Vec3) -> world::BlockPos {
     )
 }
 
+fn horizontal_neighbors(pos: world::BlockPos) -> [world::BlockPos; 4] {
+    [
+        world::BlockPos(pos.0 + 1, pos.1, pos.2),
+        world::BlockPos(pos.0 - 1, pos.1, pos.2),
+        world::BlockPos(pos.0, pos.1, pos.2 + 1),
+        world::BlockPos(pos.0, pos.1, pos.2 - 1),
+    ]
+}
+
+fn water_spread_level(level: u8) -> u8 {
+    if level >= WATER_FALLING_LEVEL {
+        WATER_SOURCE_LEVEL
+    } else {
+        level
+    }
+}
+
 fn start_chunk_generation_worker(
     seed: u64,
     feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
@@ -1485,6 +1710,7 @@ fn save_game(
             .map(|chunk| SaveChunk {
                 pos: chunk.pos(),
                 runs: encode_block_runs(chunk.blocks()),
+                properties: encode_block_properties(chunk),
             })
             .collect(),
     };
@@ -1537,6 +1763,15 @@ fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
                 }
             }
         }
+        for property in saved_chunk.properties {
+            if property.index >= world::CHUNK_VOLUME {
+                continue;
+            }
+            let x = property.index % world::CHUNK_SIZE_X;
+            let z = (property.index / world::CHUNK_SIZE_X) % world::CHUNK_SIZE_Z;
+            let y = property.index / (world::CHUNK_SIZE_X * world::CHUNK_SIZE_Z);
+            chunk.set_property(x, y, z, property.prop, property.value);
+        }
         world.insert_chunk(chunk);
     }
 
@@ -1569,6 +1804,16 @@ fn encode_block_runs(blocks: &[block::BlockId; world::CHUNK_VOLUME]) -> Vec<Save
         len,
     });
     runs
+}
+
+fn encode_block_properties(chunk: &world::Chunk) -> Vec<SaveBlockProperty> {
+    let mut properties = Vec::new();
+    for (index, props) in chunk.property_overrides() {
+        for &(prop, value) in props {
+            properties.push(SaveBlockProperty { index, prop, value });
+        }
+    }
+    properties
 }
 
 fn decode_block_runs(runs: &[SaveBlockRun]) -> Option<Vec<block::BlockId>> {
@@ -2157,6 +2402,8 @@ fn main() {
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: world::ChunkPos(0, 0),
+        pending_water_updates: VecDeque::new(),
+        queued_water_updates: HashSet::new(),
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }
