@@ -42,8 +42,8 @@ fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Qua
 
 fn biome_tint(path: &str, biome: &str) -> [f32; 3] {
     let rgb = match (path, biome) {
-        ("block/water_still", "desert") => [0x44, 0xaf, 0xd8],
-        ("block/water_still", _) => [0x3f, 0x76, 0xe4],
+        ("block/water_still" | "block/water_flow", "desert") => [0x44, 0xaf, 0xd8],
+        ("block/water_still" | "block/water_flow", _) => [0x3f, 0x76, 0xe4],
         ("block/grass_block_top" | "block/grass_block_side_overlay", "desert") => {
             [0xb7, 0xb7, 0x63]
         }
