@@ -26,7 +26,7 @@ mod world;
 mod worldgen;
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -866,46 +866,64 @@ fn start_chunk_generation_worker(
     let (request_tx, request_rx) = mpsc::channel::<world::ChunkPos>();
     let (result_tx, result_rx) = mpsc::channel::<GeneratedChunk>();
 
-    thread::Builder::new()
-        .name("chunk-generation".to_string())
-        .spawn(move || {
-            while let Ok(chunk_pos) = request_rx.recv() {
-                let mut generated_world = world::World::with_seed(seed);
-                generate_worldgen_chunk(
-                    &mut generated_world,
-                    &feature_types,
-                    &structure_sets,
-                    &noise_settings,
-                    &biome_source,
-                    chunk_pos,
-                );
-
-                if let Some(chunk) = generated_world.chunk(chunk_pos) {
-                    let mesh = mesher::mesh_chunk(
-                        chunk,
-                        &generated_world,
-                        &biome_source,
-                        &noise_settings,
-                        &model_map,
-                        &atlas_uv,
-                    );
-                    let Some(chunk) = generated_world.take_chunk(chunk_pos) else {
-                        continue;
+    let request_rx = Arc::new(Mutex::new(request_rx));
+    for worker_index in 0..worker_count() {
+        let request_rx = Arc::clone(&request_rx);
+        let result_tx = result_tx.clone();
+        let feature_types = feature_types.clone();
+        let structure_sets = structure_sets.clone();
+        let model_map = model_map.clone();
+        let atlas_uv = atlas_uv.clone();
+        thread::Builder::new()
+            .name(format!("chunk-generation-{worker_index}"))
+            .spawn(move || {
+                loop {
+                    let chunk_pos = {
+                        let request_rx =
+                            request_rx.lock().expect("chunk generation queue poisoned");
+                        request_rx.recv()
                     };
-                    if result_tx
-                        .send(GeneratedChunk {
-                            pos: chunk_pos,
-                            chunk,
-                            mesh,
-                        })
-                        .is_err()
-                    {
+                    let Ok(chunk_pos) = chunk_pos else {
                         break;
+                    };
+
+                    let mut generated_world = world::World::with_seed(seed);
+                    generate_worldgen_chunk(
+                        &mut generated_world,
+                        &feature_types,
+                        &structure_sets,
+                        &noise_settings,
+                        &biome_source,
+                        chunk_pos,
+                    );
+
+                    if let Some(chunk) = generated_world.chunk(chunk_pos) {
+                        let mesh = mesher::mesh_chunk(
+                            chunk,
+                            &generated_world,
+                            &biome_source,
+                            &noise_settings,
+                            &model_map,
+                            &atlas_uv,
+                        );
+                        let Some(chunk) = generated_world.take_chunk(chunk_pos) else {
+                            continue;
+                        };
+                        if result_tx
+                            .send(GeneratedChunk {
+                                pos: chunk_pos,
+                                chunk,
+                                mesh,
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                 }
-            }
-        })
-        .expect("failed to start chunk generation worker");
+            })
+            .expect("failed to start chunk generation worker");
+    }
 
     (request_tx, result_rx)
 }
@@ -920,36 +938,57 @@ fn start_mesh_generation_worker(
     let (request_tx, request_rx) = mpsc::channel::<MeshJob>();
     let (result_tx, result_rx) = mpsc::channel::<GeneratedMesh>();
 
-    thread::Builder::new()
-        .name("chunk-meshing".to_string())
-        .spawn(move || {
-            while let Ok(job) = request_rx.recv() {
-                let mut snapshot = world::World::with_seed(seed);
-                for chunk in job.chunks {
-                    snapshot.insert_chunk(chunk);
-                }
-
-                if let Some(chunk) = snapshot.chunk(job.pos) {
-                    let mesh = mesher::mesh_chunk(
-                        chunk,
-                        &snapshot,
-                        &biome_source,
-                        &noise_settings,
-                        &model_map,
-                        &atlas_uv,
-                    );
-                    if result_tx
-                        .send(GeneratedMesh { pos: job.pos, mesh })
-                        .is_err()
-                    {
+    let request_rx = Arc::new(Mutex::new(request_rx));
+    for worker_index in 0..worker_count() {
+        let request_rx = Arc::clone(&request_rx);
+        let result_tx = result_tx.clone();
+        let model_map = model_map.clone();
+        let atlas_uv = atlas_uv.clone();
+        thread::Builder::new()
+            .name(format!("chunk-meshing-{worker_index}"))
+            .spawn(move || {
+                loop {
+                    let job = {
+                        let request_rx = request_rx.lock().expect("chunk meshing queue poisoned");
+                        request_rx.recv()
+                    };
+                    let Ok(job) = job else {
                         break;
+                    };
+
+                    let mut snapshot = world::World::with_seed(seed);
+                    for chunk in job.chunks {
+                        snapshot.insert_chunk(chunk);
+                    }
+
+                    if let Some(chunk) = snapshot.chunk(job.pos) {
+                        let mesh = mesher::mesh_chunk(
+                            chunk,
+                            &snapshot,
+                            &biome_source,
+                            &noise_settings,
+                            &model_map,
+                            &atlas_uv,
+                        );
+                        if result_tx
+                            .send(GeneratedMesh { pos: job.pos, mesh })
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                 }
-            }
-        })
-        .expect("failed to start chunk meshing worker");
+            })
+            .expect("failed to start chunk meshing worker");
+    }
 
     (request_tx, result_rx)
+}
+
+fn worker_count() -> usize {
+    thread::available_parallelism()
+        .map(|count| count.get().saturating_sub(1).clamp(1, 4))
+        .unwrap_or(2)
 }
 
 fn generate_worldgen_chunk(
