@@ -947,6 +947,7 @@ impl App {
 
         let mut changed = false;
         if let Some(level) = current_level {
+            let mut still_water = true;
             if level != WATER_SOURCE_LEVEL {
                 if let Some(new_level) = self.recomputed_water_level(pos) {
                     if new_level != level {
@@ -955,11 +956,12 @@ impl App {
                     }
                 } else {
                     self.world.set_block(pos, block::BlockId::AIR.clone());
+                    still_water = false;
                     changed = true;
                 }
             }
 
-            if self.spread_water_from(pos) {
+            if still_water && self.spread_water_from(pos) {
                 changed = true;
             }
         } else if self
