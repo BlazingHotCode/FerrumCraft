@@ -105,6 +105,7 @@ struct App {
     fixed_update_accumulator: Duration,
     player_velocity: Vec3,
     player_grounded: bool,
+    player_crouching: bool,
     hotbar_selected: usize,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
@@ -591,8 +592,14 @@ impl App {
 
         let dt = dt.as_secs_f32();
         let mut position = camera.position();
+        position = update_player_crouch_pose(
+            &self.world,
+            position,
+            &mut self.player_crouching,
+            self.input.is_shift_pressed(),
+        );
         let desired_direction = player_move_direction(camera, &self.input);
-        let speed = if self.input.is_shift_pressed() {
+        let speed = if self.player_crouching {
             CROUCH_SPEED
         } else if self.input.is_key_pressed(KeyCode::ControlLeft)
             || self.input.is_key_pressed(KeyCode::ControlRight)
@@ -622,7 +629,7 @@ impl App {
             position,
             self.player_velocity,
             dt,
-            self.input.is_shift_pressed(),
+            self.player_crouching,
         );
         position = next_position;
         self.player_velocity = next_velocity;
@@ -671,11 +678,7 @@ impl App {
                 self.world
                     .set_block(target.place_pos, self.selected_block_id());
                 let collides = self.camera.as_ref().is_some_and(|camera| {
-                    player_collides(
-                        &self.world,
-                        camera.position(),
-                        self.input.is_shift_pressed(),
-                    )
+                    player_collides(&self.world, camera.position(), self.player_crouching)
                 });
                 if collides {
                     self.world.set_block(target.place_pos, previous);
@@ -1400,6 +1403,31 @@ fn player_move_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3
     movement.try_normalize().unwrap_or(Vec3::ZERO)
 }
 
+fn update_player_crouch_pose(
+    world: &world::World,
+    position: Vec3,
+    crouching: &mut bool,
+    requested: bool,
+) -> Vec3 {
+    if requested == *crouching {
+        return position;
+    }
+
+    let eye_delta = PLAYER_EYE_HEIGHT - PLAYER_CROUCH_EYE_HEIGHT;
+    if requested {
+        *crouching = true;
+        return position - Vec3::Y * eye_delta;
+    }
+
+    let standing_position = position + Vec3::Y * eye_delta;
+    if !player_collides(world, standing_position, false) {
+        *crouching = false;
+        standing_position
+    } else {
+        position
+    }
+}
+
 fn move_player_with_collisions(
     world: &world::World,
     mut position: Vec3,
@@ -1640,6 +1668,7 @@ fn main() {
         fixed_update_accumulator: Duration::ZERO,
         player_velocity: Vec3::ZERO,
         player_grounded: false,
+        player_crouching: false,
         hotbar_selected: 0,
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: world::ChunkPos(0, 0),
