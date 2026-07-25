@@ -19,6 +19,7 @@ pub struct Scene {
     view_projection: Mat4,
     opaque_meshes: HashMap<ChunkPos, Mesh>,
     transparent_meshes: HashMap<ChunkPos, Mesh>,
+    destroy_overlay_mesh: Option<Mesh>,
 }
 
 impl Scene {
@@ -39,6 +40,7 @@ impl Scene {
             view_projection,
             opaque_meshes: HashMap::new(),
             transparent_meshes: HashMap::new(),
+            destroy_overlay_mesh: None,
         }
     }
 
@@ -64,7 +66,14 @@ impl Scene {
 
     /// Transparent meshes submitted for rendering after opaque geometry.
     pub fn transparent_meshes(&self) -> impl Iterator<Item = &Mesh> {
-        self.transparent_meshes.values()
+        self.transparent_meshes
+            .values()
+            .chain(self.destroy_overlay_mesh.iter())
+    }
+
+    /// Inserts or removes the active block-breaking overlay mesh.
+    pub fn set_destroy_overlay_mesh(&mut self, mesh: Option<Mesh>) {
+        self.destroy_overlay_mesh = mesh;
     }
 
     /// Replaces all scene meshes (e.g. when switching from debug shapes to chunks).

@@ -232,6 +232,12 @@ impl ApplicationHandler for App {
             if seen.insert("block/grass_block_side_overlay".to_string()) {
                 paths.push("block/grass_block_side_overlay".to_string());
             }
+            for stage in 0..10 {
+                let path = format!("block/destroy_stage_{stage}");
+                if seen.insert(path.clone()) {
+                    paths.push(path);
+                }
+            }
             paths
         };
 
@@ -374,6 +380,7 @@ impl ApplicationHandler for App {
                         .camera
                         .as_ref()
                         .and_then(|camera| camera_water_tint(&self.world, camera.position()));
+                    renderer.set_destroy_overlay(self.mining_target, self.mining_progress);
                     match renderer.render(
                         debug_text.as_deref(),
                         screen_tint,

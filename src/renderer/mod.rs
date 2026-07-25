@@ -156,6 +156,32 @@ impl Renderer {
         self.scene.has_chunk_mesh(pos)
     }
 
+    /// Updates the Minecraft-style crack overlay drawn on the block being mined.
+    pub fn set_destroy_overlay(&mut self, target: Option<crate::world::BlockPos>, progress: f32) {
+        let Some(pos) = target else {
+            self.scene.set_destroy_overlay_mesh(None);
+            return;
+        };
+
+        if progress <= 0.0 {
+            self.scene.set_destroy_overlay_mesh(None);
+            return;
+        }
+
+        let stage = ((progress.clamp(0.0, 0.999) * 10.0).floor() as usize).min(9);
+        let uv = self.atlas.uv(&format!("block/destroy_stage_{stage}"));
+        let (vertices, indices) = destroy_overlay_geometry(pos, uv);
+        let mesh = Mesh::from_vertices(
+            &self.device,
+            self.pipelines.material_layout(),
+            "Destroy overlay mesh",
+            [1.0, 1.0, 1.0, 0.75],
+            &vertices,
+            &indices,
+        );
+        self.scene.set_destroy_overlay_mesh(Some(mesh));
+    }
+
     /// Encodes and presents one frame.
     pub fn render(
         &mut self,
@@ -246,6 +272,75 @@ impl Renderer {
         frame.present();
         Ok(stats)
     }
+}
+
+fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<Vertex>, Vec<u16>) {
+    let [u0, v0, u1, v1] = uv;
+    let inflate = 0.002;
+    let min = [
+        pos.0 as f32 - 8.5 - inflate,
+        pos.1 as f32 - inflate,
+        pos.2 as f32 - 8.5 - inflate,
+    ];
+    let max = [
+        pos.0 as f32 - 8.5 + 1.0 + inflate,
+        pos.1 as f32 + 1.0 + inflate,
+        pos.2 as f32 - 8.5 + 1.0 + inflate,
+    ];
+    let mut vertices = Vec::with_capacity(24);
+    let mut indices = Vec::with_capacity(36);
+    let mut push_face = |corners: [[f32; 3]; 4]| {
+        let base = vertices.len() as u16;
+        let uvs = [[u0, v1], [u0, v0], [u1, v0], [u1, v1]];
+        for (position, uv) in corners.into_iter().zip(uvs) {
+            vertices.push(Vertex {
+                position,
+                uv,
+                ao: 1.0,
+                tint: [1.0, 1.0, 1.0],
+            });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+
+    push_face([
+        [max[0], min[1], min[2]],
+        [max[0], max[1], min[2]],
+        [max[0], max[1], max[2]],
+        [max[0], min[1], max[2]],
+    ]);
+    push_face([
+        [min[0], min[1], max[2]],
+        [min[0], max[1], max[2]],
+        [min[0], max[1], min[2]],
+        [min[0], min[1], min[2]],
+    ]);
+    push_face([
+        [min[0], max[1], min[2]],
+        [min[0], max[1], max[2]],
+        [max[0], max[1], max[2]],
+        [max[0], max[1], min[2]],
+    ]);
+    push_face([
+        [min[0], min[1], max[2]],
+        [min[0], min[1], min[2]],
+        [max[0], min[1], min[2]],
+        [max[0], min[1], max[2]],
+    ]);
+    push_face([
+        [min[0], min[1], max[2]],
+        [max[0], min[1], max[2]],
+        [max[0], max[1], max[2]],
+        [min[0], max[1], max[2]],
+    ]);
+    push_face([
+        [max[0], min[1], min[2]],
+        [min[0], min[1], min[2]],
+        [min[0], max[1], min[2]],
+        [max[0], max[1], min[2]],
+    ]);
+
+    (vertices, indices)
 }
 
 fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {

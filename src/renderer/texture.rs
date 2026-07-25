@@ -107,9 +107,9 @@ impl TextureAtlas {
                 }
             }
 
-            if frames.len() > 1 {
-                let frame_time = load_animation_frame_time(resources, namespace, path)
-                    .unwrap_or(Duration::from_millis(50));
+            if frames.len() > 1
+                && let Some(frame_time) = load_animation_frame_time(resources, namespace, path)
+            {
                 animations.push(TextureAnimation {
                     atlas_x: col * TEX_SIZE,
                     atlas_y: row * TEX_SIZE,
