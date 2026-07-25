@@ -3,7 +3,7 @@
 //! This module wraps winit window setup so the application entry point does not
 //! need to know title, initial size, or ownership details.
 
-use winit::dpi::PhysicalSize;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::error::OsError;
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
@@ -54,6 +54,11 @@ impl Window {
         }
 
         self.inner.set_cursor_visible(!locked);
+    }
+
+    /// Moves the OS cursor in window coordinates when supported by the platform.
+    pub fn set_cursor_position(&self, x: f64, y: f64) {
+        let _ = self.inner.set_cursor_position(PhysicalPosition::new(x, y));
     }
 }
 

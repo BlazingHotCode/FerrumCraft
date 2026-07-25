@@ -146,6 +146,17 @@ impl InputState {
         self.cursor_position
     }
 
+    /// Sets the cursor position tracked by gameplay after programmatic cursor moves.
+    pub fn set_cursor_position(&mut self, position: (f64, f64)) {
+        self.cursor_position = Some(position);
+    }
+
+    /// Clears any queued mouse clicks that should not reach gameplay.
+    pub fn clear_mouse_clicks(&mut self) {
+        self.just_pressed_mouse_buttons.clear();
+        self.pending_mouse_clicks.clear();
+    }
+
     /// Returns and clears accumulated cursor movement.
     pub fn take_cursor_delta(&mut self) -> (f64, f64) {
         let delta = self.cursor_delta;

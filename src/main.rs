@@ -329,7 +329,7 @@ impl ApplicationHandler for App {
                 state: winit::event::ElementState::Pressed,
                 button: MouseButton::Left | MouseButton::Right,
                 ..
-            } => {
+            } if !self.inventory_open => {
                 self.set_pointer_locked(true);
             }
             WindowEvent::Resized(size) => {
@@ -825,6 +825,15 @@ impl App {
     fn toggle_inventory(&mut self) {
         self.inventory_open = !self.inventory_open;
         self.set_pointer_locked(!self.inventory_open);
+        self.input.clear_mouse_clicks();
+        if self.inventory_open {
+            if let Some(window) = &self.window {
+                let size = window.inner.inner_size();
+                let center = (size.width as f64 * 0.5, size.height as f64 * 0.5);
+                window.set_cursor_position(center.0, center.1);
+                self.input.set_cursor_position(center);
+            }
+        }
         if !self.inventory_open && !self.carried_slot.is_empty() {
             add_stack_to_inventory(
                 &mut self.hotbar_slots,
@@ -836,6 +845,7 @@ impl App {
     }
 
     fn handle_inventory_click(&mut self) {
+        self.input.take_mouse_click(MouseButton::Left);
         let Some((cursor_x, cursor_y)) = self.input.cursor_position() else {
             return;
         };
