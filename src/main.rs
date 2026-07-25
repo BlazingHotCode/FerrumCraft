@@ -923,20 +923,23 @@ impl App {
     }
 
     fn queue_water_updates_near(&mut self, pos: world::BlockPos) {
-        for update_pos in [
-            pos,
-            world::BlockPos(pos.0, pos.1 + 1, pos.2),
-            world::BlockPos(pos.0, pos.1 - 1, pos.2),
-            world::BlockPos(pos.0 + 1, pos.1, pos.2),
-            world::BlockPos(pos.0 - 1, pos.1, pos.2),
-            world::BlockPos(pos.0, pos.1, pos.2 + 1),
-            world::BlockPos(pos.0, pos.1, pos.2 - 1),
-            world::BlockPos(pos.0 + 2, pos.1, pos.2),
-            world::BlockPos(pos.0 - 2, pos.1, pos.2),
-            world::BlockPos(pos.0, pos.1, pos.2 + 2),
-            world::BlockPos(pos.0, pos.1, pos.2 - 2),
-        ] {
-            self.queue_water_update(update_pos);
+        let promoted = self.promote_nearby_water_sources(pos);
+        for origin in std::iter::once(pos).chain(promoted) {
+            for update_pos in [
+                origin,
+                world::BlockPos(origin.0, origin.1 + 1, origin.2),
+                world::BlockPos(origin.0, origin.1 - 1, origin.2),
+                world::BlockPos(origin.0 + 1, origin.1, origin.2),
+                world::BlockPos(origin.0 - 1, origin.1, origin.2),
+                world::BlockPos(origin.0, origin.1, origin.2 + 1),
+                world::BlockPos(origin.0, origin.1, origin.2 - 1),
+                world::BlockPos(origin.0 + 2, origin.1, origin.2),
+                world::BlockPos(origin.0 - 2, origin.1, origin.2),
+                world::BlockPos(origin.0, origin.1, origin.2 + 2),
+                world::BlockPos(origin.0, origin.1, origin.2 - 2),
+            ] {
+                self.queue_water_update(update_pos);
+            }
         }
     }
 
@@ -967,7 +970,7 @@ impl App {
     }
 
     fn update_water_at(&mut self, pos: world::BlockPos) -> bool {
-        let mut changed = self.promote_nearby_water_sources(pos);
+        let mut changed = !self.promote_nearby_water_sources(pos).is_empty();
 
         let block = self.world.get_block(pos);
         let current_level = if block.0 == "water" {
@@ -1017,20 +1020,19 @@ impl App {
         changed
     }
 
-    fn promote_nearby_water_sources(&mut self, pos: world::BlockPos) -> bool {
-        let mut changed = false;
+    fn promote_nearby_water_sources(&mut self, pos: world::BlockPos) -> Vec<world::BlockPos> {
+        let mut promoted = Vec::new();
         for dx in -1..=1 {
             for dz in -1..=1 {
                 let candidate = world::BlockPos(pos.0 + dx, pos.1, pos.2 + dz);
                 if self.can_generate_water_source_at(candidate) {
                     self.set_water_level(candidate, WATER_SOURCE_LEVEL);
                     self.queue_block_update_meshes(candidate);
-                    self.queue_water_updates_near(candidate);
-                    changed = true;
+                    promoted.push(candidate);
                 }
             }
         }
-        changed
+        promoted
     }
 
     fn spread_water_from(&mut self, pos: world::BlockPos) -> bool {
