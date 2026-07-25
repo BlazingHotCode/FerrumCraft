@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::block::BlockId;
 use crate::model::{BlockModel, Face};
 use crate::renderer::Vertex;
-use crate::world::{Chunk, World};
+use crate::world::{BlockPos, Chunk, World};
 use crate::worldgen::{BiomeSource, NoiseSettings};
 
 const SX: usize = 16;
@@ -19,12 +19,12 @@ fn is_transparent(b: &BlockId) -> bool {
     matches!(b.0.as_str(), "water" | "glass" | "oak_leaves")
 }
 
-fn face_visible(current: &BlockId, neighbor: &BlockId) -> bool {
-    if neighbor.0.is_empty() {
+fn face_visible(current: &BlockId, neighbor: Option<&BlockId>) -> bool {
+    let Some(neighbor) = neighbor else {
         return true;
-    }
+    };
 
-    is_transparent(neighbor) && neighbor != current
+    neighbor.0.is_empty() || (is_transparent(neighbor) && neighbor != current)
 }
 
 fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Quad) {
@@ -76,12 +76,16 @@ fn biome_tint(path: &str, biome: &str) -> [f32; 3] {
     ]
 }
 
-fn block_at_world(world: &World, x: i32, y: i32, z: i32) -> BlockId {
+fn block_at_world(world: &World, x: i32, y: i32, z: i32) -> Option<&BlockId> {
     if !(0..SY as i32).contains(&y) {
-        return BlockId::AIR;
+        return None;
     }
 
-    world.get_block(crate::world::BlockPos(x, y, z))
+    let pos = BlockPos(x, y, z);
+    let (lx, ly, lz) = pos.local();
+    world
+        .chunk(pos.chunk_pos())
+        .map(|chunk| &chunk.blocks()[ly * SZ * SX + lz * SX + lx])
 }
 
 fn occludes(world: &World, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> bool {
@@ -91,7 +95,7 @@ fn occludes(world: &World, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) ->
     }
 
     let block = block_at_world(world, x + dx, ny, z + dz);
-    !block.0.is_empty() && !is_transparent(&block)
+    block.is_some_and(|block| !block.0.is_empty() && !is_transparent(block))
 }
 
 fn vertex_ao(
@@ -280,7 +284,7 @@ pub fn mesh_chunk(
                     };
 
                 // Right (+X)
-                if face_visible(block, &block_at_world(world, world_x + 1, world_y, world_z)) {
+                if face_visible(block, block_at_world(world, world_x + 1, world_y, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Right, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 0);
                     let q = quad(
@@ -315,7 +319,7 @@ pub fn mesh_chunk(
                     }
                 }
                 // Left (-X)
-                if face_visible(block, &block_at_world(world, world_x - 1, world_y, world_z)) {
+                if face_visible(block, block_at_world(world, world_x - 1, world_y, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Left, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 1);
                     let q = quad(
@@ -350,7 +354,7 @@ pub fn mesh_chunk(
                     }
                 }
                 // Top (+Y)
-                if face_visible(block, &block_at_world(world, world_x, world_y + 1, world_z)) {
+                if face_visible(block, block_at_world(world, world_x, world_y + 1, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Top, x, y, z);
                     let q = quad(
                         2,
@@ -366,7 +370,7 @@ pub fn mesh_chunk(
                     push_quad(verts, inds, off, q);
                 }
                 // Bottom (-Y)
-                if face_visible(block, &block_at_world(world, world_x, world_y - 1, world_z)) {
+                if face_visible(block, block_at_world(world, world_x, world_y - 1, world_z)) {
                     let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Bottom, x, y, z);
                     let q = quad(
                         3,
@@ -382,7 +386,7 @@ pub fn mesh_chunk(
                     push_quad(verts, inds, off, q);
                 }
                 // Front (+Z)
-                if face_visible(block, &block_at_world(world, world_x, world_y, world_z + 1)) {
+                if face_visible(block, block_at_world(world, world_x, world_y, world_z + 1)) {
                     let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Front, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 4);
                     let q = quad(
@@ -417,7 +421,7 @@ pub fn mesh_chunk(
                     }
                 }
                 // Back (-Z)
-                if face_visible(block, &block_at_world(world, world_x, world_y, world_z - 1)) {
+                if face_visible(block, block_at_world(world, world_x, world_y, world_z - 1)) {
                     let (uv, rotation, texture) = face_uv(model, atlas_uv, Face::Back, x, y, z);
                     let ao = face_ao(world, world_x, world_y, world_z, 5);
                     let q = quad(
