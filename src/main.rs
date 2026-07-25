@@ -967,6 +967,10 @@ impl App {
     }
 
     fn update_water_at(&mut self, pos: world::BlockPos) -> bool {
+        if self.promote_nearby_water_sources(pos) {
+            return true;
+        }
+
         let block = self.world.get_block(pos);
         let current_level = if block.0 == "water" {
             Some(self.water_level(pos))
@@ -1012,6 +1016,22 @@ impl App {
         if changed {
             self.queue_block_update_meshes(pos);
             self.queue_water_updates_near(pos);
+        }
+        changed
+    }
+
+    fn promote_nearby_water_sources(&mut self, pos: world::BlockPos) -> bool {
+        let mut changed = false;
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                let candidate = world::BlockPos(pos.0 + dx, pos.1, pos.2 + dz);
+                if self.can_generate_water_source_at(candidate) {
+                    self.set_water_level(candidate, WATER_SOURCE_LEVEL);
+                    self.queue_block_update_meshes(candidate);
+                    self.queue_water_updates_near(candidate);
+                    changed = true;
+                }
+            }
         }
         changed
     }
