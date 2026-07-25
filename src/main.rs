@@ -927,23 +927,20 @@ impl App {
     }
 
     fn queue_water_updates_near(&mut self, pos: world::BlockPos) {
-        let promoted = self.promote_nearby_water_sources(pos);
-        for origin in std::iter::once(pos).chain(promoted) {
-            for update_pos in [
-                origin,
-                world::BlockPos(origin.0, origin.1 + 1, origin.2),
-                world::BlockPos(origin.0, origin.1 - 1, origin.2),
-                world::BlockPos(origin.0 + 1, origin.1, origin.2),
-                world::BlockPos(origin.0 - 1, origin.1, origin.2),
-                world::BlockPos(origin.0, origin.1, origin.2 + 1),
-                world::BlockPos(origin.0, origin.1, origin.2 - 1),
-                world::BlockPos(origin.0 + 2, origin.1, origin.2),
-                world::BlockPos(origin.0 - 2, origin.1, origin.2),
-                world::BlockPos(origin.0, origin.1, origin.2 + 2),
-                world::BlockPos(origin.0, origin.1, origin.2 - 2),
-            ] {
-                self.queue_water_update(update_pos);
-            }
+        for update_pos in [
+            pos,
+            world::BlockPos(pos.0, pos.1 + 1, pos.2),
+            world::BlockPos(pos.0, pos.1 - 1, pos.2),
+            world::BlockPos(pos.0 + 1, pos.1, pos.2),
+            world::BlockPos(pos.0 - 1, pos.1, pos.2),
+            world::BlockPos(pos.0, pos.1, pos.2 + 1),
+            world::BlockPos(pos.0, pos.1, pos.2 - 1),
+            world::BlockPos(pos.0 + 2, pos.1, pos.2),
+            world::BlockPos(pos.0 - 2, pos.1, pos.2),
+            world::BlockPos(pos.0, pos.1, pos.2 + 2),
+            world::BlockPos(pos.0, pos.1, pos.2 - 2),
+        ] {
+            self.queue_water_update(update_pos);
         }
     }
 
@@ -974,8 +971,6 @@ impl App {
     }
 
     fn update_water_at(&mut self, pos: world::BlockPos) -> bool {
-        let mut changed = !self.promote_nearby_water_sources(pos).is_empty();
-
         let block = self.world.get_block(pos);
         let current_level = if block.0 == "water" {
             Some(self.water_level(pos))
@@ -990,6 +985,7 @@ impl App {
             return true;
         }
 
+        let mut changed = false;
         if let Some(level) = current_level {
             let mut still_water = true;
             if level != WATER_SOURCE_LEVEL {
@@ -1024,21 +1020,6 @@ impl App {
         changed
     }
 
-    fn promote_nearby_water_sources(&mut self, pos: world::BlockPos) -> Vec<world::BlockPos> {
-        let mut promoted = Vec::new();
-        for dx in -1..=1 {
-            for dz in -1..=1 {
-                let candidate = world::BlockPos(pos.0 + dx, pos.1, pos.2 + dz);
-                if self.can_generate_water_source_at(candidate) {
-                    self.set_water_level(candidate, WATER_SOURCE_LEVEL);
-                    self.queue_block_update_meshes(candidate);
-                    promoted.push(candidate);
-                }
-            }
-        }
-        promoted
-    }
-
     fn spread_water_from(&mut self, pos: world::BlockPos) -> bool {
         let level = self.water_level(pos);
         let below = world::BlockPos(pos.0, pos.1 - 1, pos.2);
@@ -1047,6 +1028,9 @@ impl App {
             self.queue_block_update_meshes(below);
             self.queue_water_updates_near(below);
             return true;
+        }
+        if has_falling_water_below(&self.world, pos) {
+            return false;
         }
 
         let spread_level = water_spread_level(level);
@@ -1552,9 +1536,23 @@ fn has_two_adjacent_water_sources(world: &world::World, pos: world::BlockPos) ->
 
 fn can_generate_water_source(world: &world::World, pos: world::BlockPos) -> bool {
     let block = world.get_block(pos);
+    let below_pos = world::BlockPos(pos.0, pos.1 - 1, pos.2);
+    let below = world.get_block(below_pos);
+    let supported = pos.1 == 0
+        || (below.0 != ""
+            && (below.0 != "water" || water_level_at(world, below_pos) == WATER_SOURCE_LEVEL));
     matches!(block.0.as_str(), "" | "water")
         && !(block.0 == "water" && water_level_at(world, pos) == WATER_SOURCE_LEVEL)
         && has_two_adjacent_water_sources(world, pos)
+        && supported
+}
+
+fn has_falling_water_below(world: &world::World, pos: world::BlockPos) -> bool {
+    if pos.1 == 0 {
+        return false;
+    }
+    let below = world::BlockPos(pos.0, pos.1 - 1, pos.2);
+    world.get_block(below).0 == "water" && water_level_at(world, below) >= WATER_FALLING_LEVEL
 }
 
 fn can_water_replace(world: &world::World, pos: world::BlockPos, new_level: u8) -> bool {
@@ -1684,6 +1682,18 @@ mod water_tests {
         world.set_block(world::BlockPos(10, 9, 8), block::BlockId::AIR.clone());
 
         assert_eq!(water_spread_targets(&world, source, 1), vec![east]);
+    }
+
+    #[test]
+    fn falling_column_suppresses_horizontal_spread() {
+        let mut world = world::World::new();
+        let source = world::BlockPos(8, 10, 8);
+        let below = world::BlockPos(8, 9, 8);
+        world.set_block(source, block::BlockId("water".to_string()));
+        world.set_block(below, block::BlockId("water".to_string()));
+        world.set_block_property(below, WATER_LEVEL_PROPERTY, WATER_FALLING_LEVEL);
+
+        assert!(has_falling_water_below(&world, source));
     }
 }
 
