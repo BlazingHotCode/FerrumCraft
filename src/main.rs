@@ -25,7 +25,7 @@ mod window;
 mod world;
 mod worldgen;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -84,6 +84,7 @@ const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
 const WATER_FALLING_LEVEL: u8 = 8;
 const WATER_MAX_LEVEL: u8 = 15;
 const WATER_SOURCE_SEARCH_LIMIT: usize = 7;
+const WATER_FLOW_DELAY_TICKS: u64 = 5;
 const WATER_UPDATES_PER_TICK: usize = 128;
 
 /// Top-level application state owned by the winit event loop.
@@ -131,8 +132,9 @@ struct App {
     last_save: Instant,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
-    pending_water_updates: VecDeque<world::BlockPos>,
-    queued_water_updates: HashSet<world::BlockPos>,
+    water_tick: u64,
+    pending_water_updates: VecDeque<(world::BlockPos, u64)>,
+    queued_water_updates: HashMap<world::BlockPos, u64>,
 }
 
 struct GeneratedChunk {
@@ -500,6 +502,7 @@ impl App {
     fn fixed_update(&mut self, _dt: Duration) {
         // Match Minecraft's 20 ticks-per-second simulation rate while rendering
         // stays independent and can run at a higher frame rate.
+        self.water_tick = self.water_tick.wrapping_add(1);
         let mut camera_position = None;
         if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
             renderer.set_view_projection(camera.view_projection());
@@ -899,13 +902,23 @@ impl App {
     }
 
     fn queue_water_update(&mut self, pos: world::BlockPos) {
+        self.queue_water_update_after(pos, WATER_FLOW_DELAY_TICKS);
+    }
+
+    fn queue_water_update_after(&mut self, pos: world::BlockPos, delay_ticks: u64) {
         if !(0..world::CHUNK_SIZE_Y as i32).contains(&pos.1)
             || !self.world.is_chunk_loaded(pos.chunk_pos())
         {
             return;
         }
-        if self.queued_water_updates.insert(pos) {
-            self.pending_water_updates.push_back(pos);
+        let due_tick = self.water_tick.saturating_add(delay_ticks);
+        if self
+            .queued_water_updates
+            .get(&pos)
+            .map_or(true, |queued_tick| due_tick < *queued_tick)
+        {
+            self.queued_water_updates.insert(pos, due_tick);
+            self.pending_water_updates.push_back((pos, due_tick));
         }
     }
 
@@ -925,11 +938,23 @@ impl App {
 
     fn process_water_updates(&mut self) -> usize {
         let mut changed = 0;
-        for _ in 0..WATER_UPDATES_PER_TICK {
-            let Some(pos) = self.pending_water_updates.pop_front() else {
+        let mut processed = 0;
+        let pending_count = self.pending_water_updates.len();
+        let mut checked = 0;
+        while processed < WATER_UPDATES_PER_TICK && checked < pending_count {
+            checked += 1;
+            let Some((pos, due_tick)) = self.pending_water_updates.pop_front() else {
                 break;
             };
+            if due_tick > self.water_tick {
+                self.pending_water_updates.push_back((pos, due_tick));
+                continue;
+            }
+            if self.queued_water_updates.get(&pos).copied() != Some(due_tick) {
+                continue;
+            }
             self.queued_water_updates.remove(&pos);
+            processed += 1;
             if self.update_water_at(pos) {
                 changed += 1;
             }
@@ -2454,8 +2479,9 @@ fn main() {
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: world::ChunkPos(0, 0),
+        water_tick: 0,
         pending_water_updates: VecDeque::new(),
-        queued_water_updates: HashSet::new(),
+        queued_water_updates: HashMap::new(),
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }
