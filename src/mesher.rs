@@ -523,6 +523,7 @@ fn quad(
     tint: [f32; 3],
 ) -> Quad {
     let [u0, v0, u1, v1] = uv;
+    let side_v = |height: f32| v1 - (v1 - v0) * height.clamp(0.0, 1.0);
     let off = |v: [f32; 3]| [v[0] + ox - 8.5, v[1] + oy, v[2] + oz - 8.5];
     // Each face: (a,b,c,d) where triangles are a→b→c and a→c→d (CCW outside).
     // UV coords: bottom-left→[u0,v1], top-left→[u0,v0], top-right→[u1,v0], bottom-right→[u1,v1]
@@ -535,7 +536,12 @@ fn quad(
                 [1.0, heights[2], 1.0],
                 [1.0, 0.0, 1.0],
             ],
-            [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
+            [
+                [u0, v1],
+                [u0, side_v(heights[1])],
+                [u1, side_v(heights[2])],
+                [u1, v1],
+            ],
         ),
         // Left (-X)
         1 => (
@@ -545,7 +551,12 @@ fn quad(
                 [0.0, heights[2], 0.0],
                 [0.0, 0.0, 0.0],
             ],
-            [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
+            [
+                [u0, v1],
+                [u0, side_v(heights[1])],
+                [u1, side_v(heights[2])],
+                [u1, v1],
+            ],
         ),
         // Top (+Y)
         2 => (
@@ -575,7 +586,12 @@ fn quad(
                 [1.0, heights[2], 1.0],
                 [0.0, heights[3], 1.0],
             ],
-            [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
+            [
+                [u0, v1],
+                [u1, v1],
+                [u1, side_v(heights[2])],
+                [u0, side_v(heights[3])],
+            ],
         ),
         // Back (-Z): a=bottom-left (X=1), b=bottom-right (X=0), c=top-right, d=top-left
         5 => (
@@ -585,7 +601,12 @@ fn quad(
                 [0.0, heights[2], 0.0],
                 [1.0, heights[3], 0.0],
             ],
-            [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
+            [
+                [u0, v1],
+                [u1, v1],
+                [u1, side_v(heights[2])],
+                [u0, side_v(heights[3])],
+            ],
         ),
         _ => unreachable!(),
     };
