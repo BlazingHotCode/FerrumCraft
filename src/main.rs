@@ -967,9 +967,7 @@ impl App {
     }
 
     fn update_water_at(&mut self, pos: world::BlockPos) -> bool {
-        if self.promote_nearby_water_sources(pos) {
-            return true;
-        }
+        let mut changed = self.promote_nearby_water_sources(pos);
 
         let block = self.world.get_block(pos);
         let current_level = if block.0 == "water" {
@@ -985,7 +983,6 @@ impl App {
             return true;
         }
 
-        let mut changed = false;
         if let Some(level) = current_level {
             let mut still_water = true;
             if level != WATER_SOURCE_LEVEL {
