@@ -187,6 +187,66 @@ fn grass_side_overlay_offset(dir: u8) -> (f32, f32) {
     }
 }
 
+fn water_level(world: &World, pos: BlockPos) -> Option<u8> {
+    (world.get_block(pos).0 == "water")
+        .then(|| world.get_block_property(pos, WATER_LEVEL_PROPERTY).min(15))
+}
+
+fn water_sample_height(world: &World, pos: BlockPos) -> Option<f32> {
+    let level = water_level(world, pos)?;
+    if water_level(world, BlockPos(pos.0, pos.1 + 1, pos.2)).is_some() {
+        return Some(1.0);
+    }
+    Some(if level == 0 {
+        LOWERED_WATER_HEIGHT
+    } else if level >= WATER_FALLING_LEVEL {
+        1.0
+    } else {
+        ((8 - level) as f32 / 8.0).max(1.0 / 8.0)
+    })
+}
+
+fn water_corner_height(world: &World, x: i32, y: i32, z: i32, samples: &[(i32, i32)]) -> f32 {
+    let mut total = 0.0;
+    let mut count = 0;
+    for &(dx, dz) in samples {
+        if let Some(height) = water_sample_height(world, BlockPos(x + dx, y, z + dz)) {
+            if height >= 1.0 {
+                return 1.0;
+            }
+            total += height;
+            count += 1;
+        }
+    }
+
+    if count == 0 {
+        LOWERED_WATER_HEIGHT
+    } else {
+        total / count as f32
+    }
+}
+
+fn water_top_heights(world: &World, x: i32, y: i32, z: i32) -> [f32; 4] {
+    [
+        water_corner_height(world, x, y, z, &[(0, 0), (-1, 0), (0, -1), (-1, -1)]),
+        water_corner_height(world, x, y, z, &[(0, 0), (-1, 0), (0, 1), (-1, 1)]),
+        water_corner_height(world, x, y, z, &[(0, 0), (1, 0), (0, 1), (1, 1)]),
+        water_corner_height(world, x, y, z, &[(0, 0), (1, 0), (0, -1), (1, -1)]),
+    ]
+}
+
+fn face_vertex_heights(dir: u8, top: [f32; 4]) -> [f32; 4] {
+    match dir {
+        0 => [0.0, top[3], top[2], 0.0],
+        1 => [0.0, top[1], top[0], 0.0],
+        2 => top,
+        3 => [0.0; 4],
+        4 => [0.0, 0.0, top[2], top[1]],
+        5 => [0.0, 0.0, top[0], top[3]],
+        _ => unreachable!(),
+    }
+}
+
 /// Output of the mesher.
 pub struct MeshData {
     pub opaque: MeshLayer,
@@ -262,23 +322,11 @@ pub fn mesh_chunk(
                 let world_y = y as i32;
                 let world_z = chunk_block_z + z as i32;
                 let biome = biome_cache[z * SX + x].as_str();
-                let top_height =
+                let top_heights =
                     if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
-                        let level = world
-                            .get_block_property(
-                                crate::world::BlockPos(world_x, world_y, world_z),
-                                WATER_LEVEL_PROPERTY,
-                            )
-                            .min(15);
-                        if level == 0 {
-                            LOWERED_WATER_HEIGHT
-                        } else if level >= WATER_FALLING_LEVEL {
-                            1.0
-                        } else {
-                            ((8 - level) as f32 / 8.0).max(1.0 / 8.0)
-                        }
+                        water_top_heights(world, world_x, world_y, world_z)
                     } else {
-                        1.0
+                        [1.0; 4]
                     };
 
                 // Right (+X)
@@ -291,7 +339,7 @@ pub fn mesh_chunk(
                         fy,
                         fz,
                         uv,
-                        top_height,
+                        face_vertex_heights(0, top_heights),
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -307,7 +355,7 @@ pub fn mesh_chunk(
                                 .get("block/grass_block_side_overlay")
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            top_height,
+                            face_vertex_heights(0, top_heights),
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -324,7 +372,7 @@ pub fn mesh_chunk(
                         fy,
                         fz,
                         uv,
-                        top_height,
+                        face_vertex_heights(1, top_heights),
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -340,7 +388,7 @@ pub fn mesh_chunk(
                                 .get("block/grass_block_side_overlay")
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            top_height,
+                            face_vertex_heights(1, top_heights),
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -356,7 +404,7 @@ pub fn mesh_chunk(
                         fy,
                         fz,
                         uv,
-                        top_height,
+                        face_vertex_heights(2, top_heights),
                         face_ao(world, world_x, world_y, world_z, 2),
                         biome_tint(texture, biome),
                     );
@@ -371,7 +419,7 @@ pub fn mesh_chunk(
                         fy,
                         fz,
                         uv,
-                        top_height,
+                        face_vertex_heights(3, top_heights),
                         face_ao(world, world_x, world_y, world_z, 3),
                         biome_tint(texture, biome),
                     );
@@ -387,7 +435,7 @@ pub fn mesh_chunk(
                         fy,
                         fz,
                         uv,
-                        top_height,
+                        face_vertex_heights(4, top_heights),
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -403,7 +451,7 @@ pub fn mesh_chunk(
                                 .get("block/grass_block_side_overlay")
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            top_height,
+                            face_vertex_heights(4, top_heights),
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -420,7 +468,7 @@ pub fn mesh_chunk(
                         fy,
                         fz,
                         uv,
-                        top_height,
+                        face_vertex_heights(5, top_heights),
                         ao,
                         biome_tint(texture, biome),
                     );
@@ -436,7 +484,7 @@ pub fn mesh_chunk(
                                 .get("block/grass_block_side_overlay")
                                 .copied()
                                 .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            top_height,
+                            face_vertex_heights(5, top_heights),
                             ao,
                             biome_tint("block/grass_block_side_overlay", biome),
                         );
@@ -470,7 +518,7 @@ fn quad(
     oy: f32,
     oz: f32,
     uv: [f32; 4],
-    top_height: f32,
+    heights: [f32; 4],
     ao: [f32; 4],
     tint: [f32; 3],
 ) -> Quad {
@@ -483,8 +531,8 @@ fn quad(
         0 => (
             [
                 [1.0, 0.0, 0.0],
-                [1.0, top_height, 0.0],
-                [1.0, top_height, 1.0],
+                [1.0, heights[1], 0.0],
+                [1.0, heights[2], 1.0],
                 [1.0, 0.0, 1.0],
             ],
             [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
@@ -493,8 +541,8 @@ fn quad(
         1 => (
             [
                 [0.0, 0.0, 1.0],
-                [0.0, top_height, 1.0],
-                [0.0, top_height, 0.0],
+                [0.0, heights[1], 1.0],
+                [0.0, heights[2], 0.0],
                 [0.0, 0.0, 0.0],
             ],
             [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
@@ -502,10 +550,10 @@ fn quad(
         // Top (+Y)
         2 => (
             [
-                [0.0, top_height, 0.0],
-                [0.0, top_height, 1.0],
-                [1.0, top_height, 1.0],
-                [1.0, top_height, 0.0],
+                [0.0, heights[0], 0.0],
+                [0.0, heights[1], 1.0],
+                [1.0, heights[2], 1.0],
+                [1.0, heights[3], 0.0],
             ],
             [[u0, v1], [u0, v0], [u1, v0], [u1, v1]],
         ),
@@ -524,8 +572,8 @@ fn quad(
             [
                 [0.0, 0.0, 1.0],
                 [1.0, 0.0, 1.0],
-                [1.0, top_height, 1.0],
-                [0.0, top_height, 1.0],
+                [1.0, heights[2], 1.0],
+                [0.0, heights[3], 1.0],
             ],
             [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
         ),
@@ -534,8 +582,8 @@ fn quad(
             [
                 [1.0, 0.0, 0.0],
                 [0.0, 0.0, 0.0],
-                [0.0, top_height, 0.0],
-                [1.0, top_height, 0.0],
+                [0.0, heights[2], 0.0],
+                [1.0, heights[3], 0.0],
             ],
             [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
         ),

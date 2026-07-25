@@ -1006,21 +1006,21 @@ impl App {
     }
 
     fn recomputed_water_level(&self, pos: world::BlockPos) -> Option<u8> {
+        if self.has_two_adjacent_water_sources(pos) && self.is_water_source_supported(pos) {
+            return Some(WATER_SOURCE_LEVEL);
+        }
+
         let above = world::BlockPos(pos.0, pos.1 + 1, pos.2);
         if pos.1 + 1 < world::CHUNK_SIZE_Y as i32 && self.world.get_block(above).0 == "water" {
             return Some(WATER_FALLING_LEVEL);
         }
 
         let mut best = None;
-        let mut sources = 0;
         for neighbor in horizontal_neighbors(pos) {
             if self.world.get_block(neighbor).0 != "water" {
                 continue;
             }
             let level = self.water_level(neighbor);
-            if level == WATER_SOURCE_LEVEL {
-                sources += 1;
-            }
             let spread_level = water_spread_level(level);
             if spread_level < WATER_MAX_HORIZONTAL_LEVEL {
                 best = Some(best.map_or(spread_level + 1, |current: u8| {
@@ -1029,11 +1029,19 @@ impl App {
             }
         }
 
-        if sources >= 2 && self.is_water_supported(pos) {
-            Some(WATER_SOURCE_LEVEL)
-        } else {
-            best
-        }
+        best
+    }
+
+    fn has_two_adjacent_water_sources(&self, pos: world::BlockPos) -> bool {
+        horizontal_neighbors(pos)
+            .into_iter()
+            .filter(|neighbor| {
+                self.world.get_block(*neighbor).0 == "water"
+                    && self.water_level(*neighbor) == WATER_SOURCE_LEVEL
+            })
+            .take(2)
+            .count()
+            >= 2
     }
 
     fn can_water_replace(&self, pos: world::BlockPos, new_level: u8) -> bool {
@@ -1050,14 +1058,13 @@ impl App {
         }
     }
 
-    fn is_water_supported(&self, pos: world::BlockPos) -> bool {
+    fn is_water_source_supported(&self, pos: world::BlockPos) -> bool {
         if pos.1 == 0 {
             return true;
         }
-        let below = self
-            .world
-            .get_block(world::BlockPos(pos.0, pos.1 - 1, pos.2));
-        !matches!(below.0.as_str(), "" | "water")
+        let below_pos = world::BlockPos(pos.0, pos.1 - 1, pos.2);
+        let below = self.world.get_block(below_pos);
+        below.0 != "" && (below.0 != "water" || self.water_level(below_pos) == WATER_SOURCE_LEVEL)
     }
 
     fn set_water_level(&mut self, pos: world::BlockPos, level: u8) {
