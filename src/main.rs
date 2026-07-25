@@ -1091,20 +1091,7 @@ impl App {
     }
 
     fn can_generate_water_source_at(&self, pos: world::BlockPos) -> bool {
-        matches!(self.world.get_block(pos).0.as_str(), "" | "water")
-            && self.has_two_adjacent_water_sources(pos)
-    }
-
-    fn has_two_adjacent_water_sources(&self, pos: world::BlockPos) -> bool {
-        horizontal_neighbors(pos)
-            .into_iter()
-            .filter(|neighbor| {
-                self.world.get_block(*neighbor).0 == "water"
-                    && self.water_level(*neighbor) == WATER_SOURCE_LEVEL
-            })
-            .take(2)
-            .count()
-            >= 2
+        can_generate_water_source(&self.world, pos)
     }
 
     fn water_connected_to_source(&self, pos: world::BlockPos) -> bool {
@@ -1169,9 +1156,7 @@ impl App {
     }
 
     fn water_level(&self, pos: world::BlockPos) -> u8 {
-        self.world
-            .get_block_property(pos, WATER_LEVEL_PROPERTY)
-            .min(WATER_MAX_LEVEL)
+        water_level_at(&self.world, pos)
     }
 
     fn update_hotbar_selection(&mut self) {
@@ -1544,11 +1529,64 @@ fn horizontal_neighbors(pos: world::BlockPos) -> [world::BlockPos; 4] {
     ]
 }
 
+fn water_level_at(world: &world::World, pos: world::BlockPos) -> u8 {
+    world
+        .get_block_property(pos, WATER_LEVEL_PROPERTY)
+        .min(WATER_MAX_LEVEL)
+}
+
+fn has_two_adjacent_water_sources(world: &world::World, pos: world::BlockPos) -> bool {
+    horizontal_neighbors(pos)
+        .into_iter()
+        .filter(|neighbor| {
+            world.get_block(*neighbor).0 == "water"
+                && water_level_at(world, *neighbor) == WATER_SOURCE_LEVEL
+        })
+        .take(2)
+        .count()
+        >= 2
+}
+
+fn can_generate_water_source(world: &world::World, pos: world::BlockPos) -> bool {
+    let block = world.get_block(pos);
+    matches!(block.0.as_str(), "" | "water")
+        && !(block.0 == "water" && water_level_at(world, pos) == WATER_SOURCE_LEVEL)
+        && has_two_adjacent_water_sources(world, pos)
+}
+
 fn water_spread_level(level: u8) -> u8 {
     if level >= WATER_FALLING_LEVEL {
         WATER_SOURCE_LEVEL
     } else {
         level
+    }
+}
+
+#[cfg(test)]
+mod water_tests {
+    use super::*;
+
+    #[test]
+    fn l_shaped_sources_generate_source_over_dirt() {
+        let mut world = world::World::new();
+        let target = world::BlockPos(8, 10, 8);
+        world.set_block(
+            world::BlockPos(target.0, target.1 - 1, target.2),
+            block::BlockId("dirt".to_string()),
+        );
+        world.set_block(
+            world::BlockPos(target.0 - 1, target.1, target.2),
+            block::BlockId("water".to_string()),
+        );
+        world.set_block(
+            world::BlockPos(target.0, target.1, target.2 - 1),
+            block::BlockId("water".to_string()),
+        );
+
+        assert!(can_generate_water_source(&world, target));
+
+        world.set_block(target, block::BlockId("water".to_string()));
+        assert!(!can_generate_water_source(&world, target));
     }
 }
 
