@@ -27,7 +27,7 @@ use crate::registry::Registry;
 ///
 /// Internally this is the path portion of a NamespacedId (e.g. `"stone"`).
 /// Use the block registry to look up a BlockId by name: `registry.id("stone")`.
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct BlockId(pub String);
 
 impl BlockId {

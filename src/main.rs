@@ -26,6 +26,7 @@ mod world;
 mod worldgen;
 
 use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -61,6 +62,7 @@ const PLAYER_RADIUS: f32 = 0.3;
 const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
 const HOTBAR_BLOCKS: [&str; 5] = ["dirt", "stone", "oak_log", "oak_planks", "glass"];
+const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
@@ -107,6 +109,8 @@ struct App {
     player_grounded: bool,
     player_crouching: bool,
     hotbar_selected: usize,
+    saved_player_position: Option<Vec3>,
+    last_save: Instant,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
 }
@@ -133,6 +137,31 @@ struct BlockTarget {
     place_pos: world::BlockPos,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SaveGame {
+    seed: u64,
+    player: SavePlayer,
+    chunks: Vec<SaveChunk>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SavePlayer {
+    position: [f32; 3],
+    hotbar_selected: usize,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SaveChunk {
+    pos: world::ChunkPos,
+    runs: Vec<SaveBlockRun>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SaveBlockRun {
+    block: block::BlockId,
+    len: usize,
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -142,7 +171,11 @@ impl ApplicationHandler for App {
         let w = window::Window::new(event_loop).expect("Failed to create window");
         let size = w.inner.inner_size();
         let mut camera = FirstPersonCamera::new(size.width, size.height);
-        camera.set_position(spawn_eye_position(&self.world));
+        camera.set_position(
+            self.saved_player_position
+                .take()
+                .unwrap_or_else(|| spawn_eye_position(&self.world)),
+        );
         let font = self
             .font
             .take()
@@ -234,7 +267,10 @@ impl ApplicationHandler for App {
         self.update_hotbar_selection();
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.save_game();
+                event_loop.exit();
+            }
             WindowEvent::Focused(false) => {
                 self.set_pointer_locked(false);
             }
@@ -331,6 +367,9 @@ impl ApplicationHandler for App {
         self.update_player_movement(frame_dt);
         self.handle_block_interaction();
         self.run_fixed_updates();
+        if self.last_save.elapsed() >= AUTOSAVE_INTERVAL {
+            self.save_game();
+        }
 
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -718,6 +757,22 @@ impl App {
 
     fn selected_block_id(&self) -> block::BlockId {
         block::BlockId(HOTBAR_BLOCKS[self.hotbar_selected].to_string())
+    }
+
+    fn save_game(&mut self) {
+        let Some(camera) = &self.camera else {
+            return;
+        };
+
+        match save_game(&self.world, camera.position(), self.hotbar_selected) {
+            Ok(()) => {
+                self.last_save = Instant::now();
+                log::info!(target: "save", "Saved world to {:?}", save_path());
+            }
+            Err(error) => {
+                log::warn!(target: "save", "Failed to save world: {error}");
+            }
+        }
     }
 
     fn adjust_render_distance(&mut self, delta: i32) {
@@ -1323,6 +1378,124 @@ fn place_ao_test_structure(world: &mut world::World, origin: world::BlockPos) {
     world.set_block(world::BlockPos(origin.0, origin.1 + 2, origin.2 + 1), stone);
 }
 
+fn save_path() -> PathBuf {
+    PathBuf::from("saves").join("world.json")
+}
+
+fn save_game(
+    world: &world::World,
+    player_position: Vec3,
+    hotbar_selected: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let save = SaveGame {
+        seed: world.seed(),
+        player: SavePlayer {
+            position: [player_position.x, player_position.y, player_position.z],
+            hotbar_selected,
+        },
+        chunks: world
+            .persistent_chunks()
+            .map(|chunk| SaveChunk {
+                pos: chunk.pos(),
+                runs: encode_block_runs(chunk.blocks()),
+            })
+            .collect(),
+    };
+
+    let path = save_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&save)?)?;
+    Ok(())
+}
+
+fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
+    let path = save_path();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::warn!(target: "save", "Failed to read save {:?}: {error}", path);
+            return None;
+        }
+    };
+
+    let save = match serde_json::from_str::<SaveGame>(&text) {
+        Ok(save) => save,
+        Err(error) => {
+            log::warn!(target: "save", "Failed to parse save {:?}: {error}", path);
+            return None;
+        }
+    };
+
+    if save.seed != world.seed() {
+        log::warn!(target: "save", "Ignoring save with seed {} for world seed {}", save.seed, world.seed());
+        return None;
+    }
+
+    for saved_chunk in save.chunks {
+        let Some(blocks) = decode_block_runs(&saved_chunk.runs) else {
+            log::warn!(target: "save", "Skipping malformed chunk {:?}", saved_chunk.pos);
+            continue;
+        };
+
+        let mut chunk = world::Chunk::new(saved_chunk.pos);
+        for y in 0..world::CHUNK_SIZE_Y {
+            for z in 0..world::CHUNK_SIZE_Z {
+                for x in 0..world::CHUNK_SIZE_X {
+                    let index =
+                        y * world::CHUNK_SIZE_Z * world::CHUNK_SIZE_X + z * world::CHUNK_SIZE_X + x;
+                    chunk.set_block(x, y, z, blocks[index].clone());
+                }
+            }
+        }
+        world.insert_chunk(chunk);
+    }
+
+    log::info!(target: "save", "Loaded world from {:?}", path);
+    Some(save.player)
+}
+
+fn encode_block_runs(blocks: &[block::BlockId; world::CHUNK_VOLUME]) -> Vec<SaveBlockRun> {
+    let mut runs = Vec::new();
+    let Some(first) = blocks.first() else {
+        return runs;
+    };
+
+    let mut current = first.clone();
+    let mut len = 0;
+    for block in blocks {
+        if *block == current {
+            len += 1;
+        } else {
+            runs.push(SaveBlockRun {
+                block: current,
+                len,
+            });
+            current = block.clone();
+            len = 1;
+        }
+    }
+    runs.push(SaveBlockRun {
+        block: current,
+        len,
+    });
+    runs
+}
+
+fn decode_block_runs(runs: &[SaveBlockRun]) -> Option<Vec<block::BlockId>> {
+    let mut blocks = Vec::with_capacity(world::CHUNK_VOLUME);
+    for run in runs {
+        if run.len == 0 || blocks.len().saturating_add(run.len) > world::CHUNK_VOLUME {
+            return None;
+        }
+        blocks.extend(std::iter::repeat_n(run.block.clone(), run.len));
+    }
+
+    (blocks.len() == world::CHUNK_VOLUME).then_some(blocks)
+}
+
 fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
     let block_pos = world::BlockPos(
         camera_block_pos(position).0,
@@ -1637,6 +1810,14 @@ fn main() {
         world.drain_dirty().len(),
         world.get_block(world::BlockPos(0, 0, 0)),
     );
+    let saved_player = load_saved_game(&mut world);
+    let saved_player_position = saved_player
+        .as_ref()
+        .map(|player| Vec3::new(player.position[0], player.position[1], player.position[2]));
+    let saved_hotbar_selected = saved_player
+        .as_ref()
+        .map(|player| player.hotbar_selected.min(HOTBAR_BLOCKS.len() - 1))
+        .unwrap_or(0);
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -1669,7 +1850,9 @@ fn main() {
         player_velocity: Vec3::ZERO,
         player_grounded: false,
         player_crouching: false,
-        hotbar_selected: 0,
+        hotbar_selected: saved_hotbar_selected,
+        saved_player_position,
+        last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: world::ChunkPos(0, 0),
     };

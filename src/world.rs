@@ -18,11 +18,11 @@ pub const CHUNK_SIZE_Z: usize = 16;
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
 
 /// A position in chunk coordinate space (x, z).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ChunkPos(pub i32, pub i32);
 
 /// A position in absolute block coordinate space (x, y, z).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct BlockPos(pub i32, pub i32, pub i32);
 
 impl BlockPos {
@@ -252,6 +252,11 @@ impl World {
     /// Returns an iterator over all loaded chunks.
     pub fn chunks(&self) -> impl Iterator<Item = &Chunk> {
         self.chunks.values()
+    }
+
+    /// Returns generated chunks that should be persisted, including unloaded cache entries.
+    pub fn persistent_chunks(&self) -> impl Iterator<Item = &Chunk> {
+        self.chunks.values().chain(self.cached_chunks.values())
     }
 
     /// Returns a loaded chunk by position.
