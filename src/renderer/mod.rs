@@ -162,7 +162,13 @@ impl Renderer {
         debug_text: Option<&str>,
         screen_tint: Option<[f32; 4]>,
         hotbar_selected: usize,
+        hotbar_items: [Option<usize>; 5],
         hotbar_counts: [u32; 5],
+        inventory_open: bool,
+        inventory_items: [Option<usize>; 27],
+        inventory_counts: [u32; 27],
+        carried_item: Option<usize>,
+        carried_count: u32,
     ) -> Result<RenderStats, wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
 
@@ -203,8 +209,25 @@ impl Renderer {
             self.config.width,
             self.config.height,
             hotbar_selected,
+            hotbar_items,
             hotbar_counts,
         );
+
+        if inventory_open {
+            self.overlay.encode_inventory(
+                &self.device,
+                &mut encoder,
+                &view,
+                self.config.width,
+                self.config.height,
+                hotbar_items,
+                hotbar_counts,
+                inventory_items,
+                inventory_counts,
+                carried_item,
+                carried_count,
+            );
+        }
 
         if let Some(text) = debug_text {
             self.overlay.encode(

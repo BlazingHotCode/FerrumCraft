@@ -63,6 +63,8 @@ const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
 const HOTBAR_BLOCKS: [&str; 5] = ["dirt", "stone", "oak_log", "oak_planks", "glass"];
 const HOTBAR_SIZE: usize = HOTBAR_BLOCKS.len();
+const INVENTORY_SIZE: usize = 27;
+const MAX_STACK_SIZE: u32 = 64;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
@@ -110,7 +112,10 @@ struct App {
     player_grounded: bool,
     player_crouching: bool,
     hotbar_selected: usize,
-    hotbar_counts: [u32; HOTBAR_SIZE],
+    hotbar_slots: [InventorySlot; HOTBAR_SIZE],
+    inventory_slots: [InventorySlot; INVENTORY_SIZE],
+    carried_slot: InventorySlot,
+    inventory_open: bool,
     saved_player_position: Option<Vec3>,
     last_save: Instant,
     render_distance_chunks: i32,
@@ -139,6 +144,18 @@ struct BlockTarget {
     place_pos: world::BlockPos,
 }
 
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize, serde::Serialize)]
+struct InventorySlot {
+    item: Option<usize>,
+    count: u32,
+}
+
+impl InventorySlot {
+    fn is_empty(&self) -> bool {
+        self.item.is_none() || self.count == 0
+    }
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct SaveGame {
     seed: u64,
@@ -152,6 +169,10 @@ struct SavePlayer {
     hotbar_selected: usize,
     #[serde(default)]
     hotbar_counts: [u32; HOTBAR_SIZE],
+    #[serde(default)]
+    hotbar_slots: [InventorySlot; HOTBAR_SIZE],
+    #[serde(default)]
+    inventory_slots: [InventorySlot; INVENTORY_SIZE],
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -164,6 +185,11 @@ struct SaveChunk {
 struct SaveBlockRun {
     block: block::BlockId,
     len: usize,
+}
+
+enum InventorySlotTarget {
+    Hotbar(usize),
+    Inventory(usize),
 }
 
 impl ApplicationHandler for App {
@@ -268,7 +294,12 @@ impl ApplicationHandler for App {
             let delta = if self.input.is_shift_pressed() { -1 } else { 1 };
             self.adjust_render_distance(delta);
         }
-        self.update_hotbar_selection();
+        if self.input.was_key_just_pressed(KeyCode::KeyE) {
+            self.toggle_inventory();
+        }
+        if !self.inventory_open {
+            self.update_hotbar_selection();
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -283,8 +314,17 @@ impl ApplicationHandler for App {
                     .input
                     .was_key_just_pressed(winit::keyboard::KeyCode::Escape) =>
             {
-                self.set_pointer_locked(false);
+                if self.inventory_open {
+                    self.toggle_inventory();
+                } else {
+                    self.set_pointer_locked(false);
+                }
             }
+            WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } if self.inventory_open => self.handle_inventory_click(),
             WindowEvent::MouseInput {
                 state: winit::event::ElementState::Pressed,
                 button: MouseButton::Left | MouseButton::Right,
@@ -318,7 +358,13 @@ impl ApplicationHandler for App {
                         debug_text.as_deref(),
                         screen_tint,
                         self.hotbar_selected,
-                        self.hotbar_counts,
+                        hotbar_render_slots(&self.hotbar_slots),
+                        hotbar_render_counts(&self.hotbar_slots),
+                        self.inventory_open,
+                        inventory_render_slots(&self.inventory_slots),
+                        inventory_render_counts(&self.inventory_slots),
+                        self.carried_slot.item,
+                        self.carried_slot.count,
                     ) {
                         Ok(stats) => {
                             self.debug_overlay
@@ -372,8 +418,10 @@ impl ApplicationHandler for App {
             .min(Duration::from_millis(100));
         self.last_frame_update = now;
 
-        self.update_player_movement(frame_dt);
-        self.handle_block_interaction();
+        if !self.inventory_open {
+            self.update_player_movement(frame_dt);
+            self.handle_block_interaction();
+        }
         self.run_fixed_updates();
         if self.last_save.elapsed() >= AUTOSAVE_INTERVAL {
             self.save_game();
@@ -717,27 +765,30 @@ impl App {
             let broken_block = self.world.get_block(target.block_pos);
             self.world
                 .set_block(target.block_pos, block::BlockId::AIR.clone());
-            if let Some(slot) = hotbar_slot_for_block(&block_drop(&broken_block)) {
-                self.hotbar_counts[slot] = self.hotbar_counts[slot].saturating_add(1).min(999);
+            if let Some(item) = hotbar_slot_for_block(&block_drop(&broken_block)) {
+                add_item_to_inventory(&mut self.hotbar_slots, &mut self.inventory_slots, item, 1);
             }
             self.queue_block_update_meshes(target.block_pos);
         }
 
         if place_requested {
-            if self.hotbar_counts[self.hotbar_selected] == 0 {
+            let selected = self.hotbar_slots[self.hotbar_selected];
+            let Some(item) = selected.item else {
                 return;
-            }
+            };
             let previous = self.world.get_block(target.place_pos);
             if matches!(previous.0.as_str(), "" | "water") {
-                self.world
-                    .set_block(target.place_pos, self.selected_block_id());
+                self.world.set_block(
+                    target.place_pos,
+                    block::BlockId(HOTBAR_BLOCKS[item].to_string()),
+                );
                 let collides = self.camera.as_ref().is_some_and(|camera| {
                     player_collides(&self.world, camera.position(), self.player_crouching)
                 });
                 if collides {
                     self.world.set_block(target.place_pos, previous);
                 } else {
-                    self.hotbar_counts[self.hotbar_selected] -= 1;
+                    remove_one_from_slot(&mut self.hotbar_slots[self.hotbar_selected]);
                     self.queue_block_update_meshes(target.place_pos);
                 }
             }
@@ -771,8 +822,41 @@ impl App {
         }
     }
 
-    fn selected_block_id(&self) -> block::BlockId {
-        block::BlockId(HOTBAR_BLOCKS[self.hotbar_selected].to_string())
+    fn toggle_inventory(&mut self) {
+        self.inventory_open = !self.inventory_open;
+        self.set_pointer_locked(!self.inventory_open);
+        if !self.inventory_open && !self.carried_slot.is_empty() {
+            add_stack_to_inventory(
+                &mut self.hotbar_slots,
+                &mut self.inventory_slots,
+                self.carried_slot,
+            );
+            self.carried_slot = InventorySlot::default();
+        }
+    }
+
+    fn handle_inventory_click(&mut self) {
+        let Some((cursor_x, cursor_y)) = self.input.cursor_position() else {
+            return;
+        };
+        let Some(window) = &self.window else {
+            return;
+        };
+        let size = window.inner.inner_size();
+        let Some(target) =
+            inventory_slot_at(cursor_x as f32, cursor_y as f32, size.width, size.height)
+        else {
+            return;
+        };
+
+        match target {
+            InventorySlotTarget::Hotbar(index) => {
+                click_inventory_slot(&mut self.hotbar_slots[index], &mut self.carried_slot)
+            }
+            InventorySlotTarget::Inventory(index) => {
+                click_inventory_slot(&mut self.inventory_slots[index], &mut self.carried_slot)
+            }
+        }
     }
 
     fn save_game(&mut self) {
@@ -784,7 +868,8 @@ impl App {
             &self.world,
             camera.position(),
             self.hotbar_selected,
-            self.hotbar_counts,
+            self.hotbar_slots,
+            self.inventory_slots,
         ) {
             Ok(()) => {
                 self.last_save = Instant::now();
@@ -1407,14 +1492,17 @@ fn save_game(
     world: &world::World,
     player_position: Vec3,
     hotbar_selected: usize,
-    hotbar_counts: [u32; HOTBAR_SIZE],
+    hotbar_slots: [InventorySlot; HOTBAR_SIZE],
+    inventory_slots: [InventorySlot; INVENTORY_SIZE],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let save = SaveGame {
         seed: world.seed(),
         player: SavePlayer {
             position: [player_position.x, player_position.y, player_position.z],
             hotbar_selected,
-            hotbar_counts,
+            hotbar_counts: hotbar_counts_from_slots(&hotbar_slots),
+            hotbar_slots,
+            inventory_slots,
         },
         chunks: world
             .persistent_chunks()
@@ -1517,6 +1605,155 @@ fn decode_block_runs(runs: &[SaveBlockRun]) -> Option<Vec<block::BlockId>> {
     }
 
     (blocks.len() == world::CHUNK_VOLUME).then_some(blocks)
+}
+
+fn hotbar_counts_from_slots(slots: &[InventorySlot; HOTBAR_SIZE]) -> [u32; HOTBAR_SIZE] {
+    std::array::from_fn(|i| slots[i].count)
+}
+
+fn hotbar_render_slots(slots: &[InventorySlot; HOTBAR_SIZE]) -> [Option<usize>; HOTBAR_SIZE] {
+    std::array::from_fn(|i| slots[i].item)
+}
+
+fn hotbar_render_counts(slots: &[InventorySlot; HOTBAR_SIZE]) -> [u32; HOTBAR_SIZE] {
+    std::array::from_fn(|i| slots[i].count)
+}
+
+fn inventory_render_slots(
+    slots: &[InventorySlot; INVENTORY_SIZE],
+) -> [Option<usize>; INVENTORY_SIZE] {
+    std::array::from_fn(|i| slots[i].item)
+}
+
+fn inventory_render_counts(slots: &[InventorySlot; INVENTORY_SIZE]) -> [u32; INVENTORY_SIZE] {
+    std::array::from_fn(|i| slots[i].count)
+}
+
+fn inventory_from_saved_player(
+    player: &SavePlayer,
+) -> (
+    [InventorySlot; HOTBAR_SIZE],
+    [InventorySlot; INVENTORY_SIZE],
+) {
+    let mut hotbar_slots = player.hotbar_slots;
+    if hotbar_slots.iter().all(InventorySlot::is_empty) {
+        for (index, count) in player.hotbar_counts.iter().copied().enumerate() {
+            if count > 0 {
+                hotbar_slots[index] = InventorySlot {
+                    item: Some(index),
+                    count: count.min(MAX_STACK_SIZE),
+                };
+            }
+        }
+    }
+
+    (hotbar_slots, player.inventory_slots)
+}
+
+fn add_item_to_inventory(
+    hotbar: &mut [InventorySlot; HOTBAR_SIZE],
+    inventory: &mut [InventorySlot; INVENTORY_SIZE],
+    item: usize,
+    count: u32,
+) {
+    add_stack_to_inventory(
+        hotbar,
+        inventory,
+        InventorySlot {
+            item: Some(item),
+            count,
+        },
+    );
+}
+
+fn add_stack_to_inventory(
+    hotbar: &mut [InventorySlot; HOTBAR_SIZE],
+    inventory: &mut [InventorySlot; INVENTORY_SIZE],
+    mut stack: InventorySlot,
+) {
+    if stack.is_empty() {
+        return;
+    }
+
+    for slot in hotbar.iter_mut().chain(inventory.iter_mut()) {
+        if slot.item == stack.item && slot.count < MAX_STACK_SIZE {
+            let moved = (MAX_STACK_SIZE - slot.count).min(stack.count);
+            slot.count += moved;
+            stack.count -= moved;
+            if stack.count == 0 {
+                return;
+            }
+        }
+    }
+
+    for slot in hotbar.iter_mut().chain(inventory.iter_mut()) {
+        if slot.is_empty() {
+            let moved = MAX_STACK_SIZE.min(stack.count);
+            *slot = InventorySlot {
+                item: stack.item,
+                count: moved,
+            };
+            stack.count -= moved;
+            if stack.count == 0 {
+                return;
+            }
+        }
+    }
+}
+
+fn remove_one_from_slot(slot: &mut InventorySlot) {
+    slot.count = slot.count.saturating_sub(1);
+    if slot.count == 0 {
+        slot.item = None;
+    }
+}
+
+fn click_inventory_slot(slot: &mut InventorySlot, carried: &mut InventorySlot) {
+    if carried.is_empty() {
+        std::mem::swap(slot, carried);
+    } else if slot.is_empty() {
+        std::mem::swap(slot, carried);
+    } else if slot.item == carried.item && slot.count < MAX_STACK_SIZE {
+        let moved = (MAX_STACK_SIZE - slot.count).min(carried.count);
+        slot.count += moved;
+        carried.count -= moved;
+        if carried.count == 0 {
+            carried.item = None;
+        }
+    } else {
+        std::mem::swap(slot, carried);
+    }
+}
+
+fn inventory_slot_at(x: f32, y: f32, width: u32, height: u32) -> Option<InventorySlotTarget> {
+    let width = width.max(1) as f32;
+    let height = height.max(1) as f32;
+    let slot = 42.0;
+    let gap = 4.0;
+    let total_width = slot * 9.0 + gap * 8.0;
+    let left = width * 0.5 - total_width * 0.5;
+    let top = height * 0.5 - 112.0;
+
+    for row in 0..3 {
+        for col in 0..9 {
+            let sx = left + col as f32 * (slot + gap);
+            let sy = top + row as f32 * (slot + gap);
+            if x >= sx && x <= sx + slot && y >= sy && y <= sy + slot {
+                return Some(InventorySlotTarget::Inventory(row * 9 + col));
+            }
+        }
+    }
+
+    let hotbar_left = width * 0.5 - (slot * 5.0 + gap * 4.0) * 0.5;
+    let hotbar_top = top + 3.0 * (slot + gap) + 20.0;
+    for col in 0..HOTBAR_SIZE {
+        let sx = hotbar_left + col as f32 * (slot + gap);
+        if x >= sx && x <= sx + slot && y >= hotbar_top && y <= hotbar_top + slot {
+            return Some(InventorySlotTarget::Hotbar(col));
+        }
+    }
+
+    None
 }
 
 fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
@@ -1852,10 +2089,10 @@ fn main() {
         .as_ref()
         .map(|player| player.hotbar_selected.min(HOTBAR_BLOCKS.len() - 1))
         .unwrap_or(0);
-    let saved_hotbar_counts = saved_player
+    let (saved_hotbar_slots, saved_inventory_slots) = saved_player
         .as_ref()
-        .map(|player| player.hotbar_counts)
-        .unwrap_or([0; HOTBAR_SIZE]);
+        .map(inventory_from_saved_player)
+        .unwrap_or_default();
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -1889,7 +2126,10 @@ fn main() {
         player_grounded: false,
         player_crouching: false,
         hotbar_selected: saved_hotbar_selected,
-        hotbar_counts: saved_hotbar_counts,
+        hotbar_slots: saved_hotbar_slots,
+        inventory_slots: saved_inventory_slots,
+        carried_slot: InventorySlot::default(),
+        inventory_open: false,
         saved_player_position,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,

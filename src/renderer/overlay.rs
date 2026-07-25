@@ -359,6 +359,7 @@ impl OverlayRenderer {
         width: u32,
         height: u32,
         selected: usize,
+        items: [Option<usize>; 5],
         counts: [u32; 5],
     ) {
         let width = width.max(1) as f32;
@@ -388,45 +389,17 @@ impl OverlayRenderer {
                 height,
                 [0.08, 0.08, 0.08, 0.72],
             );
-            push_quad(
+            draw_slot_stack(
                 &mut vertices,
-                x + 13.0,
-                top + 13.0,
-                slot - 26.0,
-                slot - 26.0,
+                &self.font,
+                x,
+                top,
+                slot,
                 width,
                 height,
-                hotbar_item_color(i),
+                items[i],
+                counts[i],
             );
-            if counts[i] > 0 {
-                let text = counts[i].min(999).to_string();
-                let text_x = x + slot - 6.0 - text.len() as f32 * 12.0;
-                let text_y = top + slot - 14.0;
-                for (offset, ch) in text.chars().enumerate() {
-                    push_glyph(
-                        &mut vertices,
-                        &self.font,
-                        ch,
-                        text_x + offset as f32 * 12.0 + 1.0,
-                        text_y + 1.0,
-                        2.0,
-                        width,
-                        height,
-                        [0.0, 0.0, 0.0, 0.85],
-                    );
-                    push_glyph(
-                        &mut vertices,
-                        &self.font,
-                        ch,
-                        text_x + offset as f32 * 12.0,
-                        text_y,
-                        2.0,
-                        width,
-                        height,
-                        [1.0, 1.0, 1.0, 1.0],
-                    );
-                }
-            }
         }
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -454,6 +427,121 @@ impl OverlayRenderer {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.draw(0..vertices.len() as u32, 0..1);
     }
+
+    /// Draws a Minecraft-style inventory grid above the hotbar.
+    pub fn encode_inventory(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        hotbar_items: [Option<usize>; 5],
+        hotbar_counts: [u32; 5],
+        inventory_items: [Option<usize>; 27],
+        inventory_counts: [u32; 27],
+        carried_item: Option<usize>,
+        carried_count: u32,
+    ) {
+        let width = width.max(1) as f32;
+        let height = height.max(1) as f32;
+        let slot = 42.0;
+        let gap = 4.0;
+        let total_width = slot * 9.0 + gap * 8.0;
+        let left = width * 0.5 - total_width * 0.5;
+        let top = height * 0.5 - 112.0;
+        let mut vertices = Vec::new();
+
+        push_quad(
+            &mut vertices,
+            left - 16.0,
+            top - 20.0,
+            total_width + 32.0,
+            230.0,
+            width,
+            height,
+            [0.06, 0.06, 0.06, 0.88],
+        );
+        for row in 0..3 {
+            for col in 0..9 {
+                let index = row * 9 + col;
+                let x = left + col as f32 * (slot + gap);
+                let y = top + row as f32 * (slot + gap);
+                draw_inventory_slot(&mut vertices, x, y, slot, width, height);
+                draw_slot_stack(
+                    &mut vertices,
+                    &self.font,
+                    x,
+                    y,
+                    slot,
+                    width,
+                    height,
+                    inventory_items[index],
+                    inventory_counts[index],
+                );
+            }
+        }
+
+        let hotbar_left = width * 0.5 - (slot * 5.0 + gap * 4.0) * 0.5;
+        let hotbar_top = top + 3.0 * (slot + gap) + 20.0;
+        for col in 0..5 {
+            let x = hotbar_left + col as f32 * (slot + gap);
+            draw_inventory_slot(&mut vertices, x, hotbar_top, slot, width, height);
+            draw_slot_stack(
+                &mut vertices,
+                &self.font,
+                x,
+                hotbar_top,
+                slot,
+                width,
+                height,
+                hotbar_items[col],
+                hotbar_counts[col],
+            );
+        }
+
+        if carried_count > 0 {
+            let x = width * 0.5 + total_width * 0.5 + 28.0;
+            let y = top;
+            draw_inventory_slot(&mut vertices, x, y, slot, width, height);
+            draw_slot_stack(
+                &mut vertices,
+                &self.font,
+                x,
+                y,
+                slot,
+                width,
+                height,
+                carried_item,
+                carried_count,
+            );
+        }
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Inventory vertex buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Inventory overlay pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
 }
 
 fn hotbar_item_color(index: usize) -> [f32; 4] {
@@ -463,6 +551,93 @@ fn hotbar_item_color(index: usize) -> [f32; 4] {
         2 => [0.43, 0.27, 0.1, 1.0],
         3 => [0.65, 0.45, 0.23, 1.0],
         _ => [0.65, 0.85, 0.92, 0.8],
+    }
+}
+
+fn draw_inventory_slot(
+    vertices: &mut Vec<OverlayVertex>,
+    x: f32,
+    y: f32,
+    slot: f32,
+    width: f32,
+    height: f32,
+) {
+    push_quad(
+        vertices,
+        x,
+        y,
+        slot,
+        slot,
+        width,
+        height,
+        [0.18, 0.18, 0.18, 0.95],
+    );
+    push_quad(
+        vertices,
+        x + 3.0,
+        y + 3.0,
+        slot - 6.0,
+        slot - 6.0,
+        width,
+        height,
+        [0.08, 0.08, 0.08, 0.9],
+    );
+}
+
+fn draw_slot_stack(
+    vertices: &mut Vec<OverlayVertex>,
+    font: &Font,
+    x: f32,
+    y: f32,
+    slot: f32,
+    width: f32,
+    height: f32,
+    item: Option<usize>,
+    count: u32,
+) {
+    let Some(item) = item else {
+        return;
+    };
+    if count == 0 {
+        return;
+    }
+
+    push_quad(
+        vertices,
+        x + 13.0,
+        y + 13.0,
+        slot - 26.0,
+        slot - 26.0,
+        width,
+        height,
+        hotbar_item_color(item),
+    );
+    let text = count.min(999).to_string();
+    let text_x = x + slot - 6.0 - text.len() as f32 * 12.0;
+    let text_y = y + slot - 14.0;
+    for (offset, ch) in text.chars().enumerate() {
+        push_glyph(
+            vertices,
+            font,
+            ch,
+            text_x + offset as f32 * 12.0 + 1.0,
+            text_y + 1.0,
+            2.0,
+            width,
+            height,
+            [0.0, 0.0, 0.0, 0.85],
+        );
+        push_glyph(
+            vertices,
+            font,
+            ch,
+            text_x + offset as f32 * 12.0,
+            text_y,
+            2.0,
+            width,
+            height,
+            [1.0, 1.0, 1.0, 1.0],
+        );
     }
 }
 

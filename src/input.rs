@@ -141,6 +141,11 @@ impl InputState {
         self.cursor_delta
     }
 
+    /// Current cursor position in window coordinates, if known.
+    pub fn cursor_position(&self) -> Option<(f64, f64)> {
+        self.cursor_position
+    }
+
     /// Returns and clears accumulated cursor movement.
     pub fn take_cursor_delta(&mut self) -> (f64, f64) {
         let delta = self.cursor_delta;
