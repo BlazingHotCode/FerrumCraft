@@ -349,6 +349,91 @@ impl OverlayRenderer {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.draw(0..vertices.len() as u32, 0..1);
     }
+
+    /// Draws a compact five-slot hotbar at the bottom center.
+    pub fn encode_hotbar(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        selected: usize,
+    ) {
+        let width = width.max(1) as f32;
+        let height = height.max(1) as f32;
+        let slot = 42.0;
+        let gap = 4.0;
+        let total_width = slot * 5.0 + gap * 4.0;
+        let left = width * 0.5 - total_width * 0.5;
+        let top = height - slot - 18.0;
+        let mut vertices = Vec::with_capacity(5 * 18);
+
+        for i in 0..5 {
+            let x = left + i as f32 * (slot + gap);
+            let border = if i == selected {
+                [1.0, 1.0, 1.0, 0.95]
+            } else {
+                [0.15, 0.15, 0.15, 0.85]
+            };
+            push_quad(&mut vertices, x, top, slot, slot, width, height, border);
+            push_quad(
+                &mut vertices,
+                x + 3.0,
+                top + 3.0,
+                slot - 6.0,
+                slot - 6.0,
+                width,
+                height,
+                [0.08, 0.08, 0.08, 0.72],
+            );
+            push_quad(
+                &mut vertices,
+                x + 13.0,
+                top + 13.0,
+                slot - 26.0,
+                slot - 26.0,
+                width,
+                height,
+                hotbar_item_color(i),
+            );
+        }
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Hotbar vertex buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Hotbar overlay pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+}
+
+fn hotbar_item_color(index: usize) -> [f32; 4] {
+    match index {
+        0 => [0.45, 0.28, 0.16, 1.0],
+        1 => [0.42, 0.42, 0.42, 1.0],
+        2 => [0.43, 0.27, 0.1, 1.0],
+        3 => [0.65, 0.45, 0.23, 1.0],
+        _ => [0.65, 0.85, 0.92, 0.8],
+    }
 }
 
 fn text_vertices(font: &Font, text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {

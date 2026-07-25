@@ -60,6 +60,7 @@ const PLAYER_CROUCH_EYE_HEIGHT: f32 = 1.35;
 const PLAYER_RADIUS: f32 = 0.3;
 const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
+const HOTBAR_BLOCKS: [&str; 5] = ["dirt", "stone", "oak_log", "oak_planks", "glass"];
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
@@ -104,6 +105,7 @@ struct App {
     fixed_update_accumulator: Duration,
     player_velocity: Vec3,
     player_grounded: bool,
+    hotbar_selected: usize,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
 }
@@ -228,6 +230,7 @@ impl ApplicationHandler for App {
             let delta = if self.input.is_shift_pressed() { -1 } else { 1 };
             self.adjust_render_distance(delta);
         }
+        self.update_hotbar_selection();
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -270,7 +273,8 @@ impl ApplicationHandler for App {
                         .camera
                         .as_ref()
                         .and_then(|camera| camera_water_tint(&self.world, camera.position()));
-                    match renderer.render(debug_text.as_deref(), screen_tint) {
+                    match renderer.render(debug_text.as_deref(), screen_tint, self.hotbar_selected)
+                    {
                         Ok(stats) => {
                             self.debug_overlay
                                 .set_render_stats(stats.visible_meshes, stats.culled_meshes);
@@ -662,7 +666,7 @@ impl App {
             let previous = self.world.get_block(target.place_pos);
             if matches!(previous.0.as_str(), "" | "water") {
                 self.world
-                    .set_block(target.place_pos, block::BlockId("dirt".to_string()));
+                    .set_block(target.place_pos, self.selected_block_id());
                 let collides = self.camera.as_ref().is_some_and(|camera| {
                     player_collides(
                         &self.world,
@@ -687,6 +691,27 @@ impl App {
     fn queue_block_update_meshes(&mut self, block_pos: world::BlockPos) {
         let chunk_pos = block_pos.chunk_pos();
         self.queue_chunk_meshes_near(chunk_pos);
+    }
+
+    fn update_hotbar_selection(&mut self) {
+        for (index, key) in [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if self.input.was_key_just_pressed(key) {
+                self.hotbar_selected = index;
+            }
+        }
+    }
+
+    fn selected_block_id(&self) -> block::BlockId {
+        block::BlockId(HOTBAR_BLOCKS[self.hotbar_selected].to_string())
     }
 
     fn adjust_render_distance(&mut self, delta: i32) {
@@ -1612,6 +1637,7 @@ fn main() {
         fixed_update_accumulator: Duration::ZERO,
         player_velocity: Vec3::ZERO,
         player_grounded: false,
+        hotbar_selected: 0,
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: world::ChunkPos(0, 0),
     };
