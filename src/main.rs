@@ -1004,13 +1004,6 @@ impl App {
             if still_water && self.spread_water_from(pos) {
                 changed = true;
             }
-        } else if self
-            .recomputed_water_level(pos)
-            .is_some_and(|level| self.can_water_replace(pos, level))
-        {
-            let level = self.recomputed_water_level(pos).unwrap();
-            self.set_water_level(pos, level);
-            changed = true;
         }
 
         if changed {
@@ -1069,6 +1062,9 @@ impl App {
         let mut best = None;
         for neighbor in horizontal_neighbors(pos) {
             if self.world.get_block(neighbor).0 != "water" {
+                continue;
+            }
+            if water_flows_downward(&self.world, neighbor) {
                 continue;
             }
             if !self.water_connected_to_source(neighbor) {
@@ -1555,6 +1551,14 @@ fn has_falling_water_below(world: &world::World, pos: world::BlockPos) -> bool {
     world.get_block(below).0 == "water" && water_level_at(world, below) >= WATER_FALLING_LEVEL
 }
 
+fn water_flows_downward(world: &world::World, pos: world::BlockPos) -> bool {
+    if pos.1 == 0 {
+        return false;
+    }
+    let below = world::BlockPos(pos.0, pos.1 - 1, pos.2);
+    can_water_replace(world, below, WATER_FALLING_LEVEL) || has_falling_water_below(world, pos)
+}
+
 fn can_water_replace(world: &world::World, pos: world::BlockPos, new_level: u8) -> bool {
     if !(0..world::CHUNK_SIZE_Y as i32).contains(&pos.1) || !world.is_chunk_loaded(pos.chunk_pos())
     {
@@ -1690,10 +1694,17 @@ mod water_tests {
         let source = world::BlockPos(8, 10, 8);
         let below = world::BlockPos(8, 9, 8);
         world.set_block(source, block::BlockId("water".to_string()));
+
+        assert!(water_flows_downward(&world, source));
+
         world.set_block(below, block::BlockId("water".to_string()));
         world.set_block_property(below, WATER_LEVEL_PROPERTY, WATER_FALLING_LEVEL);
 
         assert!(has_falling_water_below(&world, source));
+        assert!(water_flows_downward(&world, source));
+
+        world.set_block(below, block::BlockId("dirt".to_string()));
+        assert!(!water_flows_downward(&world, source));
     }
 }
 
