@@ -1504,11 +1504,15 @@ fn camera_block_pos(position: Vec3) -> world::BlockPos {
 }
 
 fn horizontal_neighbors(pos: world::BlockPos) -> [world::BlockPos; 4] {
+    horizontal_directions(pos).map(|(_, neighbor)| neighbor)
+}
+
+fn horizontal_directions(pos: world::BlockPos) -> [((i32, i32), world::BlockPos); 4] {
     [
-        world::BlockPos(pos.0 + 1, pos.1, pos.2),
-        world::BlockPos(pos.0 - 1, pos.1, pos.2),
-        world::BlockPos(pos.0, pos.1, pos.2 + 1),
-        world::BlockPos(pos.0, pos.1, pos.2 - 1),
+        ((1, 0), world::BlockPos(pos.0 + 1, pos.1, pos.2)),
+        ((-1, 0), world::BlockPos(pos.0 - 1, pos.1, pos.2)),
+        ((0, 1), world::BlockPos(pos.0, pos.1, pos.2 + 1)),
+        ((0, -1), world::BlockPos(pos.0, pos.1, pos.2 - 1)),
     ]
 }
 
@@ -1583,33 +1587,50 @@ fn water_can_fall_from(world: &world::World, pos: world::BlockPos) -> bool {
 fn water_distance_to_drop(
     world: &world::World,
     start: world::BlockPos,
-    source: world::BlockPos,
     next_level: u8,
+    initial_direction: (i32, i32),
 ) -> Option<usize> {
     if water_can_fall_from(world, start) {
         return Some(0);
     }
 
-    let mut queue = VecDeque::from([(start, 0usize)]);
-    let mut visited = HashSet::from([source, start]);
-    while let Some((current, distance)) = queue.pop_front() {
-        if distance >= WATER_SLOPE_FIND_DISTANCE {
+    water_slope_distance(
+        world,
+        start,
+        next_level,
+        1,
+        (-initial_direction.0, -initial_direction.1),
+    )
+}
+
+fn water_slope_distance(
+    world: &world::World,
+    pos: world::BlockPos,
+    next_level: u8,
+    distance: usize,
+    blocked_direction: (i32, i32),
+) -> Option<usize> {
+    let mut best = None;
+    for (direction, neighbor) in horizontal_directions(pos) {
+        if direction == blocked_direction || !can_water_replace(world, neighbor, next_level) {
             continue;
         }
-
-        for neighbor in horizontal_neighbors(current) {
-            if !visited.insert(neighbor) || !can_water_replace(world, neighbor, next_level) {
-                continue;
-            }
-            let next_distance = distance + 1;
-            if water_can_fall_from(world, neighbor) {
-                return Some(next_distance);
-            }
-            queue.push_back((neighbor, next_distance));
+        if water_can_fall_from(world, neighbor) {
+            return Some(distance);
+        }
+        if distance < WATER_SLOPE_FIND_DISTANCE
+            && let Some(found) = water_slope_distance(
+                world,
+                neighbor,
+                next_level,
+                distance + 1,
+                (-direction.0, -direction.1),
+            )
+        {
+            best = Some(best.map_or(found, |current: usize| current.min(found)));
         }
     }
-
-    None
+    best
 }
 
 fn water_spread_targets(
@@ -1619,12 +1640,12 @@ fn water_spread_targets(
 ) -> Vec<world::BlockPos> {
     let mut best_distance = usize::MAX;
     let mut targets = Vec::new();
-    for candidate in horizontal_neighbors(source)
-        .into_iter()
-        .filter(|candidate| can_water_replace(world, *candidate, next_level))
-    {
+    for (direction, candidate) in horizontal_directions(source) {
+        if !can_water_replace(world, candidate, next_level) {
+            continue;
+        }
         let distance =
-            water_distance_to_drop(world, candidate, source, next_level).unwrap_or(usize::MAX);
+            water_distance_to_drop(world, candidate, next_level, direction).unwrap_or(usize::MAX);
         if distance < best_distance {
             best_distance = distance;
             targets.clear();
@@ -1647,6 +1668,16 @@ fn water_spread_level(level: u8) -> u8 {
 #[cfg(test)]
 mod water_tests {
     use super::*;
+
+    fn world_with_dirt_floor() -> world::World {
+        let mut world = world::World::new();
+        for x in 0..world::CHUNK_SIZE_X as i32 {
+            for z in 0..world::CHUNK_SIZE_Z as i32 {
+                world.set_block(world::BlockPos(x, 9, z), block::BlockId("dirt".to_string()));
+            }
+        }
+        world
+    }
 
     #[test]
     fn l_shaped_sources_generate_source_over_dirt() {
@@ -1673,19 +1704,36 @@ mod water_tests {
 
     #[test]
     fn water_paths_toward_nearest_drop() {
-        let mut world = world::World::new();
-        for x in 0..world::CHUNK_SIZE_X as i32 {
-            for z in 0..world::CHUNK_SIZE_Z as i32 {
-                world.set_block(world::BlockPos(x, 9, z), block::BlockId("dirt".to_string()));
-            }
-        }
-
+        let mut world = world_with_dirt_floor();
         let source = world::BlockPos(8, 10, 8);
         let east = world::BlockPos(9, 10, 8);
         world.set_block(source, block::BlockId("water".to_string()));
         world.set_block(world::BlockPos(10, 9, 8), block::BlockId::AIR.clone());
 
         assert_eq!(water_spread_targets(&world, source, 1), vec![east]);
+    }
+
+    #[test]
+    fn water_uses_all_equally_short_drop_routes() {
+        let mut world = world_with_dirt_floor();
+        let source = world::BlockPos(8, 10, 8);
+        let east = world::BlockPos(9, 10, 8);
+        let west = world::BlockPos(7, 10, 8);
+        world.set_block(source, block::BlockId("water".to_string()));
+        world.set_block(world::BlockPos(10, 9, 8), block::BlockId::AIR.clone());
+        world.set_block(world::BlockPos(6, 9, 8), block::BlockId::AIR.clone());
+
+        assert_eq!(water_spread_targets(&world, source, 1), vec![east, west]);
+    }
+
+    #[test]
+    fn water_ignores_drops_beyond_slope_search_distance() {
+        let mut world = world_with_dirt_floor();
+        let source = world::BlockPos(8, 10, 8);
+        world.set_block(source, block::BlockId("water".to_string()));
+        world.set_block(world::BlockPos(14, 9, 8), block::BlockId::AIR.clone());
+
+        assert_eq!(water_spread_targets(&world, source, 1).len(), 4);
     }
 
     #[test]
