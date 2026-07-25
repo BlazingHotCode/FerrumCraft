@@ -970,6 +970,13 @@ impl App {
             None
         };
 
+        if current_level != Some(WATER_SOURCE_LEVEL) && self.can_generate_water_source_at(pos) {
+            self.set_water_level(pos, WATER_SOURCE_LEVEL);
+            self.queue_block_update_meshes(pos);
+            self.queue_water_updates_near(pos);
+            return true;
+        }
+
         let mut changed = false;
         if let Some(level) = current_level {
             let mut still_water = true;
@@ -1034,7 +1041,7 @@ impl App {
     }
 
     fn recomputed_water_level(&self, pos: world::BlockPos) -> Option<u8> {
-        if self.has_two_adjacent_water_sources(pos) && self.is_water_source_supported(pos) {
+        if self.can_generate_water_source_at(pos) {
             return Some(WATER_SOURCE_LEVEL);
         }
 
@@ -1060,6 +1067,11 @@ impl App {
         }
 
         best
+    }
+
+    fn can_generate_water_source_at(&self, pos: world::BlockPos) -> bool {
+        matches!(self.world.get_block(pos).0.as_str(), "" | "water")
+            && self.has_two_adjacent_water_sources(pos)
     }
 
     fn has_two_adjacent_water_sources(&self, pos: world::BlockPos) -> bool {
@@ -1126,15 +1138,6 @@ impl App {
             "water" => self.world.get_block_property(pos, WATER_LEVEL_PROPERTY) > new_level,
             _ => false,
         }
-    }
-
-    fn is_water_source_supported(&self, pos: world::BlockPos) -> bool {
-        if pos.1 == 0 {
-            return true;
-        }
-        let below_pos = world::BlockPos(pos.0, pos.1 - 1, pos.2);
-        let below = self.world.get_block(below_pos);
-        below.0 != "" && (below.0 != "water" || self.water_level(below_pos) == WATER_SOURCE_LEVEL)
     }
 
     fn set_water_level(&mut self, pos: world::BlockPos, level: u8) {
