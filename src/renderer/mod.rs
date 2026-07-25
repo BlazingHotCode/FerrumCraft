@@ -186,6 +186,14 @@ impl Renderer {
                 .encode_tint(&self.device, &mut encoder, &view, color);
         }
 
+        self.overlay.encode_crosshair(
+            &self.device,
+            &mut encoder,
+            &view,
+            self.config.width,
+            self.config.height,
+        );
+
         if let Some(text) = debug_text {
             self.overlay.encode(
                 &self.device,
