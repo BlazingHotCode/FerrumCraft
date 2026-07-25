@@ -275,6 +275,7 @@ impl OverlayRenderer {
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
+        mining_progress: f32,
     ) {
         let width = width.max(1) as f32;
         let height = height.max(1) as f32;
@@ -323,6 +324,29 @@ impl OverlayRenderer {
             height,
             color,
         );
+        if mining_progress > 0.0 {
+            let progress = mining_progress.clamp(0.0, 1.0);
+            push_quad(
+                &mut vertices,
+                cx - 18.0,
+                cy + 14.0,
+                36.0,
+                4.0,
+                width,
+                height,
+                [0.0, 0.0, 0.0, 0.75],
+            );
+            push_quad(
+                &mut vertices,
+                cx - 17.0,
+                cy + 15.0,
+                34.0 * progress,
+                2.0,
+                width,
+                height,
+                [0.72, 0.72, 0.72, 0.95],
+            );
+        }
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Crosshair vertex buffer"),

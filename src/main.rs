@@ -118,6 +118,8 @@ struct App {
     carried_slot: InventorySlot,
     inventory_open: bool,
     inventory_toggle_held: bool,
+    mining_target: Option<world::BlockPos>,
+    mining_progress: f32,
     saved_player_position: Option<Vec3>,
     last_save: Instant,
     render_distance_chunks: i32,
@@ -383,6 +385,7 @@ impl ApplicationHandler for App {
                         inventory_render_counts(&self.inventory_slots),
                         self.carried_slot.item,
                         self.carried_slot.count,
+                        self.mining_progress,
                     ) {
                         Ok(stats) => {
                             self.debug_overlay
@@ -438,7 +441,7 @@ impl ApplicationHandler for App {
 
         if !self.inventory_open {
             self.update_player_movement(frame_dt);
-            self.handle_block_interaction();
+            self.handle_block_interaction(frame_dt);
         }
         self.run_fixed_updates();
         if self.last_save.elapsed() >= AUTOSAVE_INTERVAL {
@@ -768,29 +771,27 @@ impl App {
         }
     }
 
-    fn handle_block_interaction(&mut self) {
+    fn handle_block_interaction(&mut self, dt: Duration) {
         if !self.pointer_locked {
+            self.reset_mining();
             return;
         }
 
         let Some(target) = self.targeted_block() else {
+            self.reset_mining();
             return;
         };
 
-        let break_requested = self.input.take_mouse_click(MouseButton::Left);
         let place_requested = self.input.take_mouse_click(MouseButton::Right);
 
-        if break_requested {
-            let broken_block = self.world.get_block(target.block_pos);
-            self.world
-                .set_block(target.block_pos, block::BlockId::AIR.clone());
-            if let Some(item) = hotbar_slot_for_block(&block_drop(&broken_block)) {
-                add_item_to_inventory(&mut self.hotbar_slots, &mut self.inventory_slots, item, 1);
-            }
-            self.queue_block_update_meshes(target.block_pos);
+        if self.input.is_mouse_button_pressed(MouseButton::Left) {
+            self.update_mining(target.block_pos, dt);
+        } else {
+            self.reset_mining();
         }
 
         if place_requested {
+            self.reset_mining();
             let selected = self.hotbar_slots[self.hotbar_selected];
             let Some(item) = selected.item else {
                 return;
@@ -812,6 +813,39 @@ impl App {
                 }
             }
         }
+    }
+
+    fn update_mining(&mut self, block_pos: world::BlockPos, dt: Duration) {
+        if self.mining_target != Some(block_pos) {
+            self.mining_target = Some(block_pos);
+            self.mining_progress = 0.0;
+        }
+
+        let block = self.world.get_block(block_pos);
+        let hardness = block_break_seconds(&block);
+        if hardness <= 0.0 {
+            self.break_block(block_pos, block);
+            return;
+        }
+
+        self.mining_progress += dt.as_secs_f32() / hardness;
+        if self.mining_progress >= 1.0 {
+            self.break_block(block_pos, block);
+        }
+    }
+
+    fn break_block(&mut self, block_pos: world::BlockPos, broken_block: block::BlockId) {
+        self.world.set_block(block_pos, block::BlockId::AIR.clone());
+        if let Some(item) = hotbar_slot_for_block(&block_drop(&broken_block)) {
+            add_item_to_inventory(&mut self.hotbar_slots, &mut self.inventory_slots, item, 1);
+        }
+        self.queue_block_update_meshes(block_pos);
+        self.reset_mining();
+    }
+
+    fn reset_mining(&mut self) {
+        self.mining_target = None;
+        self.mining_progress = 0.0;
     }
 
     fn targeted_block(&self) -> Option<BlockTarget> {
@@ -1924,6 +1958,20 @@ fn block_drop(block: &block::BlockId) -> block::BlockId {
     }
 }
 
+fn block_break_seconds(block: &block::BlockId) -> f32 {
+    match block.0.as_str() {
+        "" | "water" => 0.0,
+        "oak_leaves" => 0.2,
+        "glass" => 0.3,
+        "dirt" | "sand" => 0.5,
+        "grass_block" => 0.6,
+        "stone" => 1.5,
+        "oak_log" | "oak_planks" => 2.0,
+        "coal_ore" => 3.0,
+        _ => 1.0,
+    }
+}
+
 fn main() {
     logging::init().expect("Failed to initialize logger");
     log::info!(target: "startup", "FerrumCraft v{} initializing", env!("CARGO_PKG_VERSION"));
@@ -2096,6 +2144,8 @@ fn main() {
         carried_slot: InventorySlot::default(),
         inventory_open: false,
         inventory_toggle_held: false,
+        mining_target: None,
+        mining_progress: 0.0,
         saved_player_position,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,

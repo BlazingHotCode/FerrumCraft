@@ -169,6 +169,7 @@ impl Renderer {
         inventory_counts: [u32; 27],
         carried_item: Option<usize>,
         carried_count: u32,
+        mining_progress: f32,
     ) -> Result<RenderStats, wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
 
@@ -200,6 +201,7 @@ impl Renderer {
             &view,
             self.config.width,
             self.config.height,
+            mining_progress,
         );
 
         self.overlay.encode_hotbar(
