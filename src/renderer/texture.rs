@@ -406,7 +406,7 @@ fn load_animation_frame_time(
     let meta_path = resources.path(
         namespace,
         ResourceCategory::Texture,
-        &format!("{path}.png.mcmeta"),
+        &format!("{path}.png.fcmeta"),
     );
     let text = fs::read_to_string(meta_path).ok()?;
     let meta: AnimationMetaFile = serde_json::from_str(&text).ok()?;
@@ -418,7 +418,7 @@ fn load_texture_meta(resources: &ResourceManager, namespace: &str, path: &str) {
     let meta_path = resources.path(
         namespace,
         ResourceCategory::Texture,
-        &format!("{path}.png.mcmeta"),
+        &format!("{path}.png.fcmeta"),
     );
     let Ok(text) = fs::read_to_string(meta_path) else {
         return;
