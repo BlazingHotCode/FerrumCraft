@@ -717,7 +717,7 @@ impl App {
             let broken_block = self.world.get_block(target.block_pos);
             self.world
                 .set_block(target.block_pos, block::BlockId::AIR.clone());
-            if let Some(slot) = hotbar_slot_for_block(&broken_block) {
+            if let Some(slot) = hotbar_slot_for_block(&block_drop(&broken_block)) {
                 self.hotbar_counts[slot] = self.hotbar_counts[slot].saturating_add(1).min(999);
             }
             self.queue_block_update_meshes(target.block_pos);
@@ -1703,6 +1703,13 @@ fn is_targetable_block(block: &block::BlockId) -> bool {
 
 fn hotbar_slot_for_block(block: &block::BlockId) -> Option<usize> {
     HOTBAR_BLOCKS.iter().position(|id| block.0 == *id)
+}
+
+fn block_drop(block: &block::BlockId) -> block::BlockId {
+    match block.0.as_str() {
+        "grass_block" => block::BlockId("dirt".to_string()),
+        _ => block.clone(),
+    }
 }
 
 fn main() {
