@@ -52,6 +52,11 @@ impl FirstPersonCamera {
         self.position += offset;
     }
 
+    /// Places the camera at a world-space eye position.
+    pub fn set_position(&mut self, position: Vec3) {
+        self.position = position;
+    }
+
     /// Horizontal forward direction from yaw only, ignoring pitch.
     pub fn yaw_forward(&self) -> Vec3 {
         let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
@@ -101,7 +106,7 @@ impl FirstPersonCamera {
         Mat4::perspective_rh(self.vertical_fov, self.aspect, self.near, self.far)
     }
 
-    fn forward(&self) -> Vec3 {
+    pub fn forward(&self) -> Vec3 {
         let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
         let (pitch_sin, pitch_cos) = self.pitch.sin_cos();
         Vec3::new(yaw_cos * pitch_cos, pitch_sin, yaw_sin * pitch_cos).normalize()

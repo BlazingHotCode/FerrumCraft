@@ -47,8 +47,17 @@ use winit::keyboard::KeyCode;
 const GAME_TICK_RATE: u32 = 20;
 const FIXED_TIMESTEP: Duration = Duration::from_nanos(1_000_000_000 / GAME_TICK_RATE as u64);
 const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
-const FREE_FLY_SPEED: f32 = 6.0;
-const FREE_FLY_ACCELERATION: f32 = 18.0;
+const WALK_SPEED: f32 = 4.3;
+const SPRINT_SPEED: f32 = 5.6;
+const CROUCH_SPEED: f32 = 1.3;
+const GROUND_ACCELERATION: f32 = 24.0;
+const AIR_ACCELERATION: f32 = 6.0;
+const GRAVITY: f32 = 28.0;
+const JUMP_SPEED: f32 = 8.4;
+const PLAYER_HEIGHT: f32 = 1.8;
+const PLAYER_EYE_HEIGHT: f32 = 1.62;
+const PLAYER_CROUCH_EYE_HEIGHT: f32 = 1.35;
+const PLAYER_RADIUS: f32 = 0.3;
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
@@ -91,7 +100,8 @@ struct App {
     last_update: Instant,
     last_frame_update: Instant,
     fixed_update_accumulator: Duration,
-    free_fly_velocity: Vec3,
+    player_velocity: Vec3,
+    player_grounded: bool,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
 }
@@ -120,7 +130,8 @@ impl ApplicationHandler for App {
 
         let w = window::Window::new(event_loop).expect("Failed to create window");
         let size = w.inner.inner_size();
-        let camera = FirstPersonCamera::new(size.width, size.height);
+        let mut camera = FirstPersonCamera::new(size.width, size.height);
+        camera.set_position(spawn_eye_position(&self.world));
         let font = self
             .font
             .take()
@@ -304,7 +315,7 @@ impl ApplicationHandler for App {
             .min(Duration::from_millis(100));
         self.last_frame_update = now;
 
-        self.update_free_fly_movement(frame_dt);
+        self.update_player_movement(frame_dt);
         self.run_fixed_updates();
 
         if let Some(window) = &self.window {
@@ -560,23 +571,57 @@ impl App {
         unloaded
     }
 
-    fn update_free_fly_movement(&mut self, dt: Duration) {
-        let Some(camera) = &mut self.camera else {
+    fn update_player_movement(&mut self, dt: Duration) {
+        let Some(camera) = &self.camera else {
             return;
         };
 
-        let direction = free_fly_direction(camera, &self.input);
-        let target_velocity = direction * FREE_FLY_SPEED;
-        let smoothing = 1.0 - (-FREE_FLY_ACCELERATION * dt.as_secs_f32()).exp();
-        self.free_fly_velocity = self.free_fly_velocity.lerp(target_velocity, smoothing);
+        let dt = dt.as_secs_f32();
+        let mut position = camera.position();
+        let desired_direction = player_move_direction(camera, &self.input);
+        let speed = if self.input.is_shift_pressed() {
+            CROUCH_SPEED
+        } else if self.input.is_key_pressed(KeyCode::ControlLeft)
+            || self.input.is_key_pressed(KeyCode::ControlRight)
+        {
+            SPRINT_SPEED
+        } else {
+            WALK_SPEED
+        };
+        let target_horizontal = desired_direction * speed;
+        let acceleration = if self.player_grounded {
+            GROUND_ACCELERATION
+        } else {
+            AIR_ACCELERATION
+        };
+        let smoothing = 1.0 - (-acceleration * dt).exp();
+        self.player_velocity.x += (target_horizontal.x - self.player_velocity.x) * smoothing;
+        self.player_velocity.z += (target_horizontal.z - self.player_velocity.z) * smoothing;
 
-        if self.free_fly_velocity.length_squared() > 0.0001 {
-            camera.translate_world(self.free_fly_velocity * dt.as_secs_f32());
+        if self.player_grounded && self.input.is_key_pressed(KeyCode::Space) {
+            self.player_velocity.y = JUMP_SPEED;
+            self.player_grounded = false;
         }
+        self.player_velocity.y -= GRAVITY * dt;
 
-        let position = camera.position();
+        let (next_position, next_velocity, grounded) = move_player_with_collisions(
+            &self.world,
+            position,
+            self.player_velocity,
+            dt,
+            self.input.is_shift_pressed(),
+        );
+        position = next_position;
+        self.player_velocity = next_velocity;
+        self.player_grounded = grounded;
+
+        if let Some(camera) = &mut self.camera {
+            camera.set_position(position);
+        }
         if let Some(renderer) = &mut self.renderer {
-            renderer.set_view_projection(camera.view_projection());
+            if let Some(camera) = &self.camera {
+                renderer.set_view_projection(camera.view_projection());
+            }
         }
         self.debug_overlay.set_player_position(position);
         self.update_debug_biome(position);
@@ -1214,7 +1259,22 @@ fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
     }
 }
 
-fn free_fly_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
+fn spawn_eye_position(world: &world::World) -> Vec3 {
+    let block_x = 8;
+    let block_z = 8;
+    let ground_y = (0..world::CHUNK_SIZE_Y as i32)
+        .rev()
+        .find(|y| is_player_solid_block(&world.get_block(world::BlockPos(block_x, *y, block_z))))
+        .unwrap_or(16);
+
+    Vec3::new(
+        block_x as f32 + 0.5 - WORLD_RENDER_OFFSET,
+        ground_y as f32 + 1.0 + PLAYER_EYE_HEIGHT,
+        block_z as f32 + 0.5 - WORLD_RENDER_OFFSET,
+    )
+}
+
+fn player_move_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
     let mut movement = Vec3::ZERO;
 
     if input.is_key_pressed(KeyCode::KeyW) {
@@ -1229,14 +1289,81 @@ fn free_fly_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
     if input.is_key_pressed(KeyCode::KeyD) {
         movement += camera.yaw_right();
     }
-    if input.is_key_pressed(KeyCode::Space) {
-        movement.y += 1.0;
-    }
-    if input.is_key_pressed(KeyCode::ShiftLeft) || input.is_key_pressed(KeyCode::ShiftRight) {
-        movement.y -= 1.0;
-    }
 
     movement.try_normalize().unwrap_or(Vec3::ZERO)
+}
+
+fn move_player_with_collisions(
+    world: &world::World,
+    mut position: Vec3,
+    mut velocity: Vec3,
+    dt: f32,
+    crouching: bool,
+) -> (Vec3, Vec3, bool) {
+    let mut grounded = false;
+
+    position.x += velocity.x * dt;
+    if player_collides(world, position, crouching) {
+        position.x -= velocity.x * dt;
+        velocity.x = 0.0;
+    }
+
+    position.z += velocity.z * dt;
+    if player_collides(world, position, crouching) {
+        position.z -= velocity.z * dt;
+        velocity.z = 0.0;
+    }
+
+    position.y += velocity.y * dt;
+    if player_collides(world, position, crouching) {
+        position.y -= velocity.y * dt;
+        if velocity.y < 0.0 {
+            grounded = true;
+        }
+        velocity.y = 0.0;
+    }
+
+    if !grounded {
+        let probe = position - Vec3::Y * 0.03;
+        grounded = player_collides(world, probe, crouching);
+    }
+
+    (position, velocity, grounded)
+}
+
+fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) -> bool {
+    let eye_height = if crouching {
+        PLAYER_CROUCH_EYE_HEIGHT
+    } else {
+        PLAYER_EYE_HEIGHT
+    };
+    let height = if crouching { 1.5 } else { PLAYER_HEIGHT };
+    let feet_y = eye_position.y - eye_height;
+    let min_x = eye_position.x + WORLD_RENDER_OFFSET - PLAYER_RADIUS;
+    let max_x = eye_position.x + WORLD_RENDER_OFFSET + PLAYER_RADIUS;
+    let min_y = feet_y;
+    let max_y = feet_y + height;
+    let min_z = eye_position.z + WORLD_RENDER_OFFSET - PLAYER_RADIUS;
+    let max_z = eye_position.z + WORLD_RENDER_OFFSET + PLAYER_RADIUS;
+
+    for y in min_y.floor() as i32..=max_y.floor() as i32 {
+        if !(0..world::CHUNK_SIZE_Y as i32).contains(&y) {
+            return y < 0;
+        }
+        for z in min_z.floor() as i32..=max_z.floor() as i32 {
+            for x in min_x.floor() as i32..=max_x.floor() as i32 {
+                if is_player_solid_block(&world.get_block(world::BlockPos(x, y, z))) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn is_player_solid_block(block: &block::BlockId) -> bool {
+    !matches!(block.0.as_str(), "" | "water" | "oak_leaves")
 }
 
 fn main() {
@@ -1400,7 +1527,8 @@ fn main() {
         last_update: Instant::now(),
         last_frame_update: Instant::now(),
         fixed_update_accumulator: Duration::ZERO,
-        free_fly_velocity: Vec3::ZERO,
+        player_velocity: Vec3::ZERO,
+        player_grounded: false,
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: world::ChunkPos(0, 0),
     };
