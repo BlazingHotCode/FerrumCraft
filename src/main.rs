@@ -148,6 +148,7 @@ struct App {
     classic_spawn_position: Vec3,
     classic_view_distance: usize,
     saved_player_position: Option<Vec3>,
+    player_overlap_recovery_pending: bool,
     last_save: Instant,
     render_distance_chunks: i32,
     mesh_center_chunk: world::ChunkPos,
@@ -755,11 +756,14 @@ impl App {
         if !aabb_chunks_loaded(&self.world, Aabb::player(position)) {
             return;
         }
-        let resolved_position = resolve_player_overlap(&self.world, position);
-        if resolved_position != position {
-            position = resolved_position;
-            self.player_velocity = Vec3::ZERO;
-            self.player_grounded = false;
+        if self.player_overlap_recovery_pending {
+            self.player_overlap_recovery_pending = false;
+            let resolved_position = resolve_player_overlap(&self.world, position);
+            if resolved_position != position {
+                position = resolved_position;
+                self.player_velocity = Vec3::ZERO;
+                self.player_grounded = false;
+            }
         }
         let desired_direction = player_move_direction(camera, &self.input);
         let jump_held = self.input.is_key_pressed(KeyCode::Space);
@@ -906,6 +910,7 @@ impl App {
         self.player_velocity = Vec3::ZERO;
         self.player_grounded = false;
         self.player_jump_latched = false;
+        self.player_overlap_recovery_pending = false;
     }
 
     fn update_classic_mobs(&mut self) {
@@ -2115,6 +2120,10 @@ mod early_classic_tests {
     fn placement_target_is_the_air_cell_before_the_hit_block() {
         let mut world = world::World::new();
         world.set_block(
+            world::BlockPos(8, 20, 9),
+            block::BlockId("water".to_string()),
+        );
+        world.set_block(
             world::BlockPos(8, 20, 10),
             block::BlockId("stone".to_string()),
         );
@@ -3203,7 +3212,7 @@ fn aabb_chunks_loaded(world: &world::World, bounds: Aabb) -> bool {
 }
 
 fn is_targetable_block(block: &block::BlockId) -> bool {
-    !block.0.is_empty()
+    !matches!(block.0.as_str(), "" | "water" | "lava")
 }
 
 fn classic_pick_volume_contains(eye: Vec3, block: world::BlockPos) -> bool {
@@ -3432,6 +3441,7 @@ fn main() {
     let saved_player_position = saved_player
         .as_ref()
         .map(|player| Vec3::new(player.position[0], player.position[1], player.position[2]));
+    let player_overlap_recovery_pending = saved_player_position.is_some();
     let saved_hotbar_selected = saved_player
         .as_ref()
         .map(|player| player.hotbar_selected.min(HOTBAR_SIZE - 1))
@@ -3491,6 +3501,7 @@ fn main() {
         classic_spawn_position,
         classic_view_distance: 0,
         saved_player_position,
+        player_overlap_recovery_pending,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
         mesh_center_chunk: spawn_chunk,
