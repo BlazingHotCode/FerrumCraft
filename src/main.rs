@@ -55,6 +55,11 @@ const GROUND_ACCELERATION: f32 = 24.0;
 const AIR_ACCELERATION: f32 = 6.0;
 const GRAVITY: f32 = 28.0;
 const JUMP_SPEED: f32 = 8.4;
+const SWIM_SPEED: f32 = 2.2;
+const SWIM_VERTICAL_SPEED: f32 = 2.4;
+const WATER_ACCELERATION: f32 = 8.0;
+const WATER_DRAG: f32 = 2.4;
+const WATER_CURRENT_ACCELERATION: f32 = 1.2;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
 const PLAYER_CROUCH_EYE_HEIGHT: f32 = 1.35;
@@ -742,37 +747,59 @@ impl App {
 
         let dt = dt.as_secs_f32();
         let mut position = camera.position();
+        let in_water = player_in_water(&self.world, position, self.player_crouching);
         position = update_player_crouch_pose(
             &self.world,
             position,
             &mut self.player_crouching,
-            self.input.is_shift_pressed(),
+            self.input.is_shift_pressed() && !in_water,
         );
         let desired_direction = player_move_direction(camera, &self.input);
-        let speed = if self.player_crouching {
-            CROUCH_SPEED
-        } else if self.input.is_key_pressed(KeyCode::ControlLeft)
-            || self.input.is_key_pressed(KeyCode::ControlRight)
-        {
-            SPRINT_SPEED
-        } else {
-            WALK_SPEED
-        };
-        let target_horizontal = desired_direction * speed;
-        let acceleration = if self.player_grounded {
-            GROUND_ACCELERATION
-        } else {
-            AIR_ACCELERATION
-        };
-        let smoothing = 1.0 - (-acceleration * dt).exp();
-        self.player_velocity.x += (target_horizontal.x - self.player_velocity.x) * smoothing;
-        self.player_velocity.z += (target_horizontal.z - self.player_velocity.z) * smoothing;
+        if in_water {
+            let target_horizontal = desired_direction * SWIM_SPEED;
+            let smoothing = 1.0 - (-WATER_ACCELERATION * dt).exp();
+            self.player_velocity.x += (target_horizontal.x - self.player_velocity.x) * smoothing;
+            self.player_velocity.z += (target_horizontal.z - self.player_velocity.z) * smoothing;
 
-        if self.player_grounded && self.input.is_key_pressed(KeyCode::Space) {
-            self.player_velocity.y = JUMP_SPEED;
+            let target_vertical = if self.input.is_key_pressed(KeyCode::Space) {
+                SWIM_VERTICAL_SPEED
+            } else if self.input.is_shift_pressed() {
+                -SWIM_VERTICAL_SPEED
+            } else {
+                -0.15
+            };
+            self.player_velocity.y += (target_vertical - self.player_velocity.y) * smoothing;
+            self.player_velocity += water_current_at(&self.world, position, self.player_crouching)
+                * WATER_CURRENT_ACCELERATION
+                * dt;
+            self.player_velocity *= (-WATER_DRAG * dt).exp();
             self.player_grounded = false;
+        } else {
+            let speed = if self.player_crouching {
+                CROUCH_SPEED
+            } else if self.input.is_key_pressed(KeyCode::ControlLeft)
+                || self.input.is_key_pressed(KeyCode::ControlRight)
+            {
+                SPRINT_SPEED
+            } else {
+                WALK_SPEED
+            };
+            let target_horizontal = desired_direction * speed;
+            let acceleration = if self.player_grounded {
+                GROUND_ACCELERATION
+            } else {
+                AIR_ACCELERATION
+            };
+            let smoothing = 1.0 - (-acceleration * dt).exp();
+            self.player_velocity.x += (target_horizontal.x - self.player_velocity.x) * smoothing;
+            self.player_velocity.z += (target_horizontal.z - self.player_velocity.z) * smoothing;
+
+            if self.player_grounded && self.input.is_key_pressed(KeyCode::Space) {
+                self.player_velocity.y = JUMP_SPEED;
+                self.player_grounded = false;
+            }
+            self.player_velocity.y -= GRAVITY * dt;
         }
-        self.player_velocity.y -= GRAVITY * dt;
 
         let (next_position, next_velocity, grounded) = move_player_with_collisions(
             &self.world,
@@ -784,7 +811,7 @@ impl App {
         );
         position = next_position;
         self.player_velocity = next_velocity;
-        self.player_grounded = grounded;
+        self.player_grounded = grounded && !in_water;
 
         if let Some(camera) = &mut self.camera {
             camera.set_position(position);
@@ -1754,6 +1781,46 @@ mod water_tests {
         world.set_block(below, block::BlockId("dirt".to_string()));
         assert!(!water_flows_downward(&world, source));
     }
+
+    #[test]
+    fn player_immersion_respects_water_surface_height() {
+        let mut world = world::World::new();
+        world.set_block(
+            world::BlockPos(8, 10, 8),
+            block::BlockId("water".to_string()),
+        );
+        let center = Vec3::new(0.0, 10.5, 0.0);
+
+        assert!(water_block_at_point(&world, center).is_some());
+        assert!(water_block_at_point(&world, Vec3::new(0.0, 10.9, 0.0)).is_none());
+        assert!(player_in_water(
+            &world,
+            Vec3::new(0.0, 10.0 + PLAYER_EYE_HEIGHT, 0.0),
+            false,
+        ));
+    }
+
+    #[test]
+    fn water_current_points_toward_lower_level() {
+        let mut world = world::World::new();
+        let source = world::BlockPos(8, 10, 8);
+        let east = world::BlockPos(9, 10, 8);
+        world.set_block(source, block::BlockId("water".to_string()));
+        world.set_block(east, block::BlockId("water".to_string()));
+        world.set_block_property(east, WATER_LEVEL_PROPERTY, 1);
+        for solid in [
+            world::BlockPos(7, 10, 8),
+            world::BlockPos(8, 10, 7),
+            world::BlockPos(8, 10, 9),
+        ] {
+            world.set_block(solid, block::BlockId("stone".to_string()));
+        }
+
+        let current =
+            water_current_at(&world, Vec3::new(0.0, 10.5 + PLAYER_EYE_HEIGHT, 0.0), false);
+        assert!(current.x > 0.9);
+        assert!(current.z.abs() < 0.01);
+    }
 }
 
 fn start_chunk_generation_worker(
@@ -2313,24 +2380,79 @@ fn inventory_slot_at(x: f32, y: f32, width: u32, height: u32) -> Option<Inventor
 }
 
 fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
-    let block_pos = world::BlockPos(
-        camera_block_pos(position).0,
-        camera_block_pos(position).1,
-        camera_block_pos(position).2,
-    );
-    if world.get_block(block_pos).0 != "water" {
+    water_block_at_point(world, position).map(|_| [0.0196, 0.0196, 0.2, 0.65])
+}
+
+fn water_surface_height(world: &world::World, pos: world::BlockPos) -> f32 {
+    if world.get_block(world::BlockPos(pos.0, pos.1 + 1, pos.2)).0 == "water" {
+        return 1.0;
+    }
+    match water_level_at(world, pos) {
+        WATER_SOURCE_LEVEL => 14.0 / 16.0,
+        level if level >= WATER_FALLING_LEVEL => 1.0,
+        level => ((8 - level.min(WATER_MAX_HORIZONTAL_LEVEL)) as f32 / 8.0).max(1.0 / 8.0),
+    }
+}
+
+fn water_block_at_point(world: &world::World, point: Vec3) -> Option<world::BlockPos> {
+    let pos = camera_block_pos(point);
+    if world.get_block(pos).0 != "water" {
         return None;
     }
+    let local_y = point.y - point.y.floor();
+    (local_y < water_surface_height(world, pos)).then_some(pos)
+}
 
-    let local_y = position.y - position.y.floor();
-    let has_water_above = world
-        .get_block(world::BlockPos(block_pos.0, block_pos.1 + 1, block_pos.2))
-        .0
-        == "water";
-    if has_water_above || local_y < 14.0 / 16.0 {
-        Some([0.0196, 0.0196, 0.2, 0.65])
+fn player_water_block(
+    world: &world::World,
+    eye_position: Vec3,
+    crouching: bool,
+) -> Option<world::BlockPos> {
+    let eye_height = if crouching {
+        PLAYER_CROUCH_EYE_HEIGHT
     } else {
-        None
+        PLAYER_EYE_HEIGHT
+    };
+    let height = if crouching { 1.5 } else { PLAYER_HEIGHT };
+    let feet_y = eye_position.y - eye_height;
+    [feet_y + 0.1, feet_y + height * 0.5, eye_position.y - 0.05]
+        .into_iter()
+        .find_map(|y| water_block_at_point(world, Vec3::new(eye_position.x, y, eye_position.z)))
+}
+
+fn player_in_water(world: &world::World, eye_position: Vec3, crouching: bool) -> bool {
+    player_water_block(world, eye_position, crouching).is_some()
+}
+
+fn water_current_at(world: &world::World, eye_position: Vec3, crouching: bool) -> Vec3 {
+    let Some(pos) = player_water_block(world, eye_position, crouching) else {
+        return Vec3::ZERO;
+    };
+    let level = water_level_at(world, pos);
+    let depth = water_flow_depth(level);
+    let mut current = Vec3::ZERO;
+    for ((dx, dz), neighbor) in horizontal_directions(pos) {
+        let neighbor_block = world.get_block(neighbor);
+        let difference = if neighbor_block.0 == "water" {
+            depth - water_flow_depth(water_level_at(world, neighbor))
+        } else if neighbor_block.0.is_empty() {
+            depth
+        } else {
+            continue;
+        };
+        current += Vec3::new(dx as f32, 0.0, dz as f32) * difference;
+    }
+    if level >= WATER_FALLING_LEVEL {
+        current.y -= 1.0;
+    }
+    current.try_normalize().unwrap_or(Vec3::ZERO)
+}
+
+fn water_flow_depth(level: u8) -> f32 {
+    if level == WATER_SOURCE_LEVEL || level >= WATER_FALLING_LEVEL {
+        8.0
+    } else {
+        (8 - level.min(WATER_MAX_HORIZONTAL_LEVEL)) as f32
     }
 }
 
