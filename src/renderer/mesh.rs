@@ -58,6 +58,8 @@ pub struct Mesh {
     index_count: u32,
     material: Material,
     bounds: Bounds,
+    vertex_capacity: usize,
+    index_capacity: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -167,7 +169,53 @@ impl Mesh {
             index_count: indices.len() as u32,
             material: Material::new(device, material_layout, label, base_color),
             bounds,
+            vertex_capacity: vertices.len(),
+            index_capacity: indices.len(),
         }
+    }
+
+    pub fn dynamic(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        material_layout: &wgpu::BindGroupLayout,
+        label: &str,
+        base_color: [f32; 4],
+        vertices: &[Vertex],
+        indices: &[u32],
+        capacities: (usize, usize),
+    ) -> Self {
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label} vertex buffer")),
+            size: (capacities.0 * std::mem::size_of::<Vertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label} index buffer")),
+            size: (capacities.1 * std::mem::size_of::<u32>()) as u64,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut mesh = Self {
+            vertex_buffer,
+            index_buffer,
+            index_count: 0,
+            material: Material::new(device, material_layout, label, base_color),
+            bounds: Bounds::from_vertices(vertices),
+            vertex_capacity: capacities.0,
+            index_capacity: capacities.1,
+        };
+        mesh.update(queue, vertices, indices);
+        mesh
+    }
+
+    pub fn update(&mut self, queue: &wgpu::Queue, vertices: &[Vertex], indices: &[u32]) {
+        assert!(vertices.len() <= self.vertex_capacity);
+        assert!(indices.len() <= self.index_capacity);
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
+        queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(indices));
+        self.index_count = indices.len() as u32;
+        self.bounds = Bounds::from_vertices(vertices);
     }
 
     /// GPU vertex buffer backing this mesh.

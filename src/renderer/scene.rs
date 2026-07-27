@@ -133,6 +133,10 @@ impl Scene {
         self.classic_mob_mesh = mesh;
     }
 
+    pub fn classic_mob_mesh_mut(&mut self) -> Option<&mut Mesh> {
+        self.classic_mob_mesh.as_mut()
+    }
+
     /// Replaces all scene meshes (e.g. when switching from debug shapes to chunks).
     pub fn set_meshes(
         &mut self,

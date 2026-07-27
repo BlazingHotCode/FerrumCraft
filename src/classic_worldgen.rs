@@ -567,7 +567,7 @@ fn gradient(hash: usize, x: f64, y: f64, z: f64) -> f64 {
     (if hash & 1 == 0 { first } else { -first }) + if hash & 2 == 0 { second } else { -second }
 }
 
-struct JavaRandom {
+pub(crate) struct JavaRandom {
     state: u64,
 }
 
@@ -576,7 +576,7 @@ impl JavaRandom {
     const ADDEND: u64 = 0xB;
     const MASK: u64 = (1 << 48) - 1;
 
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self {
             state: (seed ^ Self::MULTIPLIER) & Self::MASK,
         }
@@ -605,7 +605,7 @@ impl JavaRandom {
         }
     }
 
-    fn next_float(&mut self) -> f32 {
+    pub(crate) fn next_float(&mut self) -> f32 {
         self.next(24) as f32 / (1u32 << 24) as f32
     }
 }

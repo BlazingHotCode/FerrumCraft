@@ -134,6 +134,7 @@ struct App {
     fixed_update_accumulator: Duration,
     player_velocity: Vec3,
     player_grounded: bool,
+    player_jump_latched: bool,
     player_crouching: bool,
     hotbar_selected: usize,
     hotbar_slots: [InventorySlot; HOTBAR_SIZE],
@@ -154,6 +155,7 @@ struct App {
     pending_water_updates: VecDeque<(world::BlockPos, u64)>,
     queued_water_updates: HashMap<world::BlockPos, u64>,
     classic_mobs: Vec<ClassicMob>,
+    classic_mob_random: classic_worldgen::JavaRandom,
 }
 
 struct GeneratedChunk {
@@ -174,9 +176,11 @@ struct GeneratedMesh {
 
 struct ClassicMob {
     position: Vec3,
+    previous_position: Vec3,
     velocity: Vec3,
     heading: f32,
     turn_velocity: f32,
+    time_offset: f32,
     grounded: bool,
 }
 
@@ -204,7 +208,19 @@ struct SaveGame {
     format_version: u32,
     seed: u64,
     player: SavePlayer,
+    #[serde(default)]
+    mobs: Vec<SaveMob>,
     chunks: Vec<SaveChunk>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SaveMob {
+    position: [f32; 3],
+    velocity: [f32; 3],
+    heading: f32,
+    turn_velocity: f32,
+    time_offset: f32,
+    grounded: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -388,6 +404,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                self.update_rendered_mobs();
                 if let Some(renderer) = &mut self.renderer {
                     let frame_start = Instant::now();
                     let classic_text = self.debug_overlay.classic_text();
@@ -736,6 +753,10 @@ impl App {
         let _ = dt;
         let mut position = camera.position();
         let desired_direction = player_move_direction(camera, &self.input);
+        let jump_held = self.input.is_key_pressed(KeyCode::Space);
+        if !jump_held {
+            self.player_jump_latched = false;
+        }
         let fluid = player_fluid(&self.world, position);
         if let Some(fluid) = fluid {
             accelerate_horizontal(
@@ -743,22 +764,30 @@ impl App {
                 desired_direction,
                 CLASSIC_AIR_ACCELERATION,
             );
-            if self.input.is_key_pressed(KeyCode::Space) {
+            if jump_held {
                 self.player_velocity.y += 0.04;
             }
-            let (next_position, next_velocity, _) = move_player_with_collisions(
-                &self.world,
-                position,
-                self.player_velocity,
-                1.0,
-                false,
-                false,
-            );
+            let old_y = position.y;
+            let (next_position, next_velocity, grounded, horizontal_collision) =
+                move_player_with_collisions(&self.world, position, self.player_velocity);
             position = next_position;
             self.player_velocity = next_velocity;
             self.player_velocity *= if fluid == "lava" { 0.5 } else { 0.8 };
             self.player_velocity.y -= 0.02;
-            self.player_grounded = false;
+            if horizontal_collision
+                && player_is_free_offset(
+                    &self.world,
+                    position,
+                    Vec3::new(
+                        self.player_velocity.x,
+                        self.player_velocity.y + 0.6 - position.y + old_y,
+                        self.player_velocity.z,
+                    ),
+                )
+            {
+                self.player_velocity.y = 0.3;
+            }
+            self.player_grounded = grounded;
         } else {
             let acceleration = if self.player_grounded {
                 CLASSIC_GROUND_ACCELERATION
@@ -767,18 +796,13 @@ impl App {
             };
             accelerate_horizontal(&mut self.player_velocity, desired_direction, acceleration);
 
-            if self.player_grounded && self.input.is_key_pressed(KeyCode::Space) {
+            if self.player_grounded && jump_held && !self.player_jump_latched {
                 self.player_velocity.y = CLASSIC_JUMP_VELOCITY;
+                self.player_jump_latched = true;
                 self.player_grounded = false;
             }
-            let (next_position, next_velocity, grounded) = move_player_with_collisions(
-                &self.world,
-                position,
-                self.player_velocity,
-                1.0,
-                false,
-                self.player_grounded,
-            );
+            let (next_position, next_velocity, grounded, _) =
+                move_player_with_collisions(&self.world, position, self.player_velocity);
             position = next_position;
             self.player_velocity = next_velocity;
             self.player_velocity.x *= 0.91;
@@ -848,11 +872,18 @@ impl App {
         }
         if self.input.was_key_just_pressed(KeyCode::KeyG) && self.classic_mobs.len() < 256 {
             if let Some(camera) = &self.camera {
+                // Zombie.setPos centers its initial 1.8-high box on the player's eye Y.
+                let position = camera.position() - Vec3::Y * (PLAYER_HEIGHT * 0.5);
+                let turn_velocity = (self.classic_mob_random.next_float() + 1.0) * 0.01;
+                let time_offset = self.classic_mob_random.next_float() * 1_239_813.0;
+                let heading = self.classic_mob_random.next_float() * std::f32::consts::TAU;
                 self.classic_mobs.push(ClassicMob {
-                    position: camera.position() - Vec3::Y * PLAYER_EYE_HEIGHT,
+                    position,
+                    previous_position: position,
                     velocity: Vec3::ZERO,
-                    heading: self.water_tick as f32 * 0.37,
-                    turn_velocity: 0.02,
+                    heading,
+                    turn_velocity,
+                    time_offset,
                     grounded: false,
                 });
             }
@@ -865,41 +896,66 @@ impl App {
         }
         self.player_velocity = Vec3::ZERO;
         self.player_grounded = false;
+        self.player_jump_latched = false;
     }
 
     fn update_classic_mobs(&mut self) {
-        for (index, mob) in self.classic_mobs.iter_mut().enumerate() {
-            let noise = ((self.water_tick as f32 + index as f32 * 17.0) * 0.173).sin();
-            mob.turn_velocity = (mob.turn_velocity + noise * 0.08) * 0.99;
+        for mob in &mut self.classic_mobs {
+            if !aabb_chunks_loaded(&self.world, Aabb::feet(mob.position)) {
+                continue;
+            }
+            mob.previous_position = mob.position;
             mob.heading += mob.turn_velocity;
+            mob.turn_velocity *= 0.99;
+            mob.turn_velocity += (self.classic_mob_random.next_float()
+                - self.classic_mob_random.next_float())
+                * self.classic_mob_random.next_float()
+                * self.classic_mob_random.next_float()
+                * 0.08;
             let acceleration = if mob.grounded { 0.1 } else { 0.02 };
-            mob.velocity.x += mob.heading.cos() * acceleration;
-            mob.velocity.z += mob.heading.sin() * acceleration;
-            if mob.grounded && noise > 0.84 {
+            mob.velocity.x += mob.heading.sin() * acceleration;
+            mob.velocity.z += mob.heading.cos() * acceleration;
+            if mob.grounded && self.classic_mob_random.next_float() < 0.08 {
                 mob.velocity.y = 0.5;
                 mob.grounded = false;
             }
 
-            let eye = mob.position + Vec3::Y * PLAYER_EYE_HEIGHT;
-            let (next_eye, next_velocity, grounded) = move_player_with_collisions(
-                &self.world,
-                eye,
-                mob.velocity,
-                1.0,
-                false,
-                mob.grounded,
-            );
-            mob.position = next_eye - Vec3::Y * PLAYER_EYE_HEIGHT;
+            mob.velocity.y -= CLASSIC_GRAVITY;
+            let (next_position, next_velocity, grounded, _) =
+                move_mob_with_collisions(&self.world, mob.position, mob.velocity);
+            mob.position = next_position;
             mob.velocity = next_velocity;
-            mob.velocity.x *= if grounded { 0.7 * 0.91 } else { 0.91 };
-            mob.velocity.z *= if grounded { 0.7 * 0.91 } else { 0.91 };
-            mob.velocity.y = mob.velocity.y * 0.98 - CLASSIC_GRAVITY;
+            mob.velocity.x *= 0.91;
+            mob.velocity.y *= 0.98;
+            mob.velocity.z *= 0.91;
+            if grounded {
+                mob.velocity.x *= 0.7;
+                mob.velocity.z *= 0.7;
+            }
             mob.grounded = grounded;
         }
+        self.classic_mobs.retain(|mob| mob.position.y >= -100.0);
+    }
 
+    fn update_rendered_mobs(&mut self) {
+        let alpha = (self.fixed_update_accumulator.as_secs_f32() / FIXED_TIMESTEP.as_secs_f32())
+            .clamp(0.0, 1.0);
+        let rendered_mobs: Vec<_> = self
+            .classic_mobs
+            .iter()
+            .filter(|mob| aabb_chunks_loaded(&self.world, Aabb::feet(mob.position)))
+            .map(|mob| {
+                let position = mob.previous_position.lerp(mob.position, alpha);
+                renderer::ClassicMobRender {
+                    position,
+                    heading: mob.heading,
+                    time_offset: mob.time_offset,
+                    brightness: classic_entity_brightness(&self.world, position),
+                }
+            })
+            .collect();
         if let Some(renderer) = &mut self.renderer {
-            let positions: Vec<_> = self.classic_mobs.iter().map(|mob| mob.position).collect();
-            renderer.set_classic_mobs(&positions);
+            renderer.set_classic_mobs(&rendered_mobs, (self.water_tick as f32 + alpha) * 0.5);
         }
     }
 
@@ -1347,6 +1403,7 @@ impl App {
             self.hotbar_selected,
             self.hotbar_slots,
             self.inventory_slots,
+            &self.classic_mobs,
         ) {
             Ok(()) => {
                 self.last_save = Instant::now();
@@ -2060,6 +2117,53 @@ mod early_classic_tests {
     }
 
     #[test]
+    fn swept_classic_collision_clips_fast_movement_and_allows_face_contact() {
+        let mut world = world::World::new();
+        world.set_block(
+            world::BlockPos(1, 0, 0),
+            block::BlockId("stone".to_string()),
+        );
+        let start = Vec3::new(0.5, PLAYER_EYE_HEIGHT, 0.5);
+        let (position, velocity, _, horizontal_collision) =
+            move_player_with_collisions(&world, start, Vec3::new(2.0, 0.0, 0.0));
+
+        assert!((position.x - 0.7).abs() < 1.0e-6);
+        assert_eq!(velocity.x, 0.0);
+        assert!(horizontal_collision);
+        assert!(!player_collides(
+            &world,
+            Vec3::new(0.7, PLAYER_EYE_HEIGHT, 0.5),
+            false,
+        ));
+    }
+
+    #[test]
+    fn classic_fluid_detection_uses_the_player_aabb() {
+        let mut world = world::World::new();
+        world.set_block(
+            world::BlockPos(1, 0, 0),
+            block::BlockId("water".to_string()),
+        );
+
+        assert_eq!(
+            player_fluid(&world, Vec3::new(0.75, PLAYER_EYE_HEIGHT, 0.5)),
+            Some("water")
+        );
+    }
+
+    #[test]
+    fn classic_collision_supplies_a_floor_below_the_level() {
+        let world = world::World::new();
+        let start = Vec3::new(8.5, PLAYER_EYE_HEIGHT, 8.5);
+        let (position, velocity, grounded, _) =
+            move_player_with_collisions(&world, start, Vec3::new(0.0, -1.0, 0.0));
+
+        assert_eq!(position, start);
+        assert_eq!(velocity.y, 0.0);
+        assert!(grounded);
+    }
+
+    #[test]
     fn save_version_is_read_from_header_without_parsing_chunks() {
         let header = r#"{
             "format_version": 4,
@@ -2271,6 +2375,7 @@ fn save_game(
     hotbar_selected: usize,
     hotbar_slots: [InventorySlot; HOTBAR_SIZE],
     inventory_slots: [InventorySlot; INVENTORY_SIZE],
+    mobs: &[ClassicMob],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let save = SaveGame {
         format_version: CLASSIC_SAVE_VERSION,
@@ -2282,6 +2387,17 @@ fn save_game(
             hotbar_slots: hotbar_slots.to_vec(),
             inventory_slots: inventory_slots.to_vec(),
         },
+        mobs: mobs
+            .iter()
+            .map(|mob| SaveMob {
+                position: mob.position.to_array(),
+                velocity: mob.velocity.to_array(),
+                heading: mob.heading,
+                turn_velocity: mob.turn_velocity,
+                time_offset: mob.time_offset,
+                grounded: mob.grounded,
+            })
+            .collect(),
         chunks: world
             .persistent_chunks()
             .map(|chunk| SaveChunk {
@@ -2300,7 +2416,7 @@ fn save_game(
     Ok(())
 }
 
-fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
+fn load_saved_game(world: &mut world::World) -> Option<(SavePlayer, Vec<ClassicMob>)> {
     let path = save_path();
     let mut header = String::new();
     let mut file = match std::fs::File::open(&path) {
@@ -2370,7 +2486,23 @@ fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
     }
 
     log::info!(target: "save", "Loaded world from {:?}", path);
-    Some(save.player)
+    let mobs = save
+        .mobs
+        .into_iter()
+        .map(|mob| {
+            let position = Vec3::from_array(mob.position);
+            ClassicMob {
+                position,
+                previous_position: position,
+                velocity: Vec3::from_array(mob.velocity),
+                heading: mob.heading,
+                turn_velocity: mob.turn_velocity,
+                time_offset: mob.time_offset,
+                grounded: mob.grounded,
+            }
+        })
+        .collect();
+    Some((save.player, mobs))
 }
 
 fn saved_format_version(header: &str) -> Option<u32> {
@@ -2761,143 +2893,280 @@ fn accelerate_horizontal(velocity: &mut Vec3, direction: Vec3, acceleration: f32
 }
 
 fn player_fluid(world: &world::World, eye_position: Vec3) -> Option<&'static str> {
-    let feet_y = eye_position.y - PLAYER_EYE_HEIGHT;
-    for y in [
-        feet_y + 0.4,
-        feet_y + PLAYER_HEIGHT * 0.5,
-        eye_position.y - 0.4,
-    ] {
-        match world
-            .get_block(camera_block_pos(Vec3::new(
-                eye_position.x,
-                y,
-                eye_position.z,
-            )))
-            .0
-            .as_str()
-        {
-            "water" => return Some("water"),
-            "lava" => return Some("lava"),
-            _ => {}
-        }
+    let bounds = Aabb::player(eye_position);
+    let water_bounds = Aabb {
+        min: bounds.min + Vec3::Y * 0.4,
+        max: bounds.max - Vec3::Y * 0.4,
+    };
+    if aabb_contains_fluid(world, water_bounds, "water") {
+        Some("water")
+    } else if aabb_contains_fluid(world, bounds, "lava") {
+        Some("lava")
+    } else {
+        None
     }
-    None
 }
 
-fn update_player_crouch_pose(
-    world: &world::World,
-    position: Vec3,
-    crouching: &mut bool,
-    requested: bool,
-) -> Vec3 {
-    if requested == *crouching {
-        return position;
-    }
-
-    let eye_delta = PLAYER_EYE_HEIGHT - PLAYER_CROUCH_EYE_HEIGHT;
-    if requested {
-        *crouching = true;
-        return position - Vec3::Y * eye_delta;
-    }
-
-    let standing_position = position + Vec3::Y * eye_delta;
-    if !player_collides(world, standing_position, false) {
-        *crouching = false;
-        standing_position
-    } else {
-        position
-    }
+fn aabb_contains_fluid(world: &world::World, bounds: Aabb, fluid: &str) -> bool {
+    block_positions(bounds)
+        .any(|pos| world.get_block(pos).0 == fluid && bounds.intersects(Aabb::block(pos)))
 }
 
 fn move_player_with_collisions(
     world: &world::World,
-    mut position: Vec3,
-    mut velocity: Vec3,
-    dt: f32,
-    crouching: bool,
-    was_grounded: bool,
-) -> (Vec3, Vec3, bool) {
-    let mut grounded = false;
+    position: Vec3,
+    velocity: Vec3,
+) -> (Vec3, Vec3, bool, bool) {
+    let (bounds, velocity, grounded, horizontal_collision) =
+        move_entity_with_collisions(world, Aabb::player(position), velocity);
+    (
+        Vec3::new(
+            (bounds.min.x + bounds.max.x) * 0.5,
+            bounds.min.y + PLAYER_EYE_HEIGHT,
+            (bounds.min.z + bounds.max.z) * 0.5,
+        ),
+        velocity,
+        grounded,
+        horizontal_collision,
+    )
+}
 
-    position.x += velocity.x * dt;
-    if player_collides(world, position, crouching)
-        || (crouching && was_grounded && !player_has_ground_support(world, position, crouching))
-    {
-        position.x -= velocity.x * dt;
+fn move_mob_with_collisions(
+    world: &world::World,
+    feet_position: Vec3,
+    velocity: Vec3,
+) -> (Vec3, Vec3, bool, bool) {
+    let (bounds, velocity, grounded, horizontal_collision) =
+        move_entity_with_collisions(world, Aabb::feet(feet_position), velocity);
+    (
+        Vec3::new(
+            (bounds.min.x + bounds.max.x) * 0.5,
+            bounds.min.y,
+            (bounds.min.z + bounds.max.z) * 0.5,
+        ),
+        velocity,
+        grounded,
+        horizontal_collision,
+    )
+}
+
+fn move_entity_with_collisions(
+    world: &world::World,
+    mut bounds: Aabb,
+    mut velocity: Vec3,
+) -> (Aabb, Vec3, bool, bool) {
+    let requested = velocity;
+    let colliders = entity_colliders(world, bounds.expand(requested));
+
+    for collider in &colliders {
+        velocity.y = collider.clip_y(bounds, velocity.y);
+    }
+    bounds = bounds.moved(Vec3::Y * velocity.y);
+    for collider in &colliders {
+        velocity.x = collider.clip_x(bounds, velocity.x);
+    }
+    bounds = bounds.moved(Vec3::X * velocity.x);
+    for collider in &colliders {
+        velocity.z = collider.clip_z(bounds, velocity.z);
+    }
+    bounds = bounds.moved(Vec3::Z * velocity.z);
+
+    let horizontal_collision = requested.x != velocity.x || requested.z != velocity.z;
+    let grounded = requested.y != velocity.y && requested.y < 0.0;
+    if requested.x != velocity.x {
         velocity.x = 0.0;
     }
-
-    position.z += velocity.z * dt;
-    if player_collides(world, position, crouching)
-        || (crouching && was_grounded && !player_has_ground_support(world, position, crouching))
-    {
-        position.z -= velocity.z * dt;
-        velocity.z = 0.0;
-    }
-
-    position.y += velocity.y * dt;
-    if player_collides(world, position, crouching) {
-        position.y -= velocity.y * dt;
-        if velocity.y < 0.0 {
-            grounded = true;
-        }
+    if requested.y != velocity.y {
         velocity.y = 0.0;
     }
-
-    if !grounded {
-        let probe = position - Vec3::Y * 0.03;
-        grounded = player_collides(world, probe, crouching);
+    if requested.z != velocity.z {
+        velocity.z = 0.0;
     }
-
-    (position, velocity, grounded)
+    (bounds, velocity, grounded, horizontal_collision)
 }
 
-fn player_has_ground_support(world: &world::World, eye_position: Vec3, crouching: bool) -> bool {
-    let probe = eye_position - Vec3::Y * 0.08;
-    player_collides(world, probe, crouching)
+fn player_is_free_offset(world: &world::World, eye_position: Vec3, offset: Vec3) -> bool {
+    let bounds = Aabb::player(eye_position).moved(offset);
+    let clear_of_blocks = !entity_colliders(world, bounds)
+        .into_iter()
+        .any(|collider| bounds.intersects(collider));
+    clear_of_blocks
+        && !aabb_contains_fluid(world, bounds, "water")
+        && !aabb_contains_fluid(world, bounds, "lava")
 }
 
-fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) -> bool {
-    let eye_height = if crouching {
-        PLAYER_CROUCH_EYE_HEIGHT
-    } else {
-        PLAYER_EYE_HEIGHT
-    };
-    let height = if crouching { 1.5 } else { PLAYER_HEIGHT };
-    let feet_y = eye_position.y - eye_height;
-    let min_x = eye_position.x - PLAYER_RADIUS;
-    let max_x = eye_position.x + PLAYER_RADIUS;
-    let min_y = feet_y;
-    let max_y = feet_y + height;
-    let min_z = eye_position.z - PLAYER_RADIUS;
-    let max_z = eye_position.z + PLAYER_RADIUS;
-
-    if min_x < 0.0
-        || max_x >= CLASSIC_WORLD_SIZE as f32
-        || min_z < 0.0
-        || max_z >= CLASSIC_WORLD_SIZE as f32
-    {
-        return true;
-    }
-
-    for y in min_y.floor() as i32..=max_y.floor() as i32 {
-        if !(0..world::CHUNK_SIZE_Y as i32).contains(&y) {
-            return y < 0;
-        }
-        for z in min_z.floor() as i32..=max_z.floor() as i32 {
-            for x in min_x.floor() as i32..=max_x.floor() as i32 {
-                if is_player_solid_block(&world.get_block(world::BlockPos(x, y, z))) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
+fn player_collides(world: &world::World, eye_position: Vec3, _crouching: bool) -> bool {
+    let bounds = Aabb::player(eye_position);
+    entity_colliders(world, bounds)
+        .into_iter()
+        .any(|collider| bounds.intersects(collider))
 }
 
 fn is_player_solid_block(block: &block::BlockId) -> bool {
     !matches!(block.0.as_str(), "" | "water" | "lava" | "oak_sapling")
+}
+
+fn classic_entity_brightness(world: &world::World, position: Vec3) -> f32 {
+    let x = position.x as i32;
+    let y = position.y as i32;
+    let z = position.z as i32;
+    if x < 0
+        || z < 0
+        || x >= CLASSIC_WORLD_SIZE
+        || z >= CLASSIC_WORLD_SIZE
+        || !(0..world::CHUNK_SIZE_Y as i32).contains(&y)
+    {
+        return 1.0;
+    }
+    let light_depth = (1..world::CHUNK_SIZE_Y as i32)
+        .rev()
+        .find(|&scan_y| {
+            !matches!(
+                world.get_block(world::BlockPos(x, scan_y, z)).0.as_str(),
+                "" | "oak_leaves" | "oak_sapling" | "water" | "lava" | "glass"
+            )
+        })
+        .map_or(1, |blocker_y| blocker_y + 1);
+    if y >= light_depth { 1.0 } else { 0.5 }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Aabb {
+    min: Vec3,
+    max: Vec3,
+}
+
+impl Aabb {
+    fn player(eye: Vec3) -> Self {
+        Self::feet(eye - Vec3::Y * PLAYER_EYE_HEIGHT)
+    }
+
+    fn feet(feet: Vec3) -> Self {
+        Self {
+            min: feet - Vec3::new(PLAYER_RADIUS, 0.0, PLAYER_RADIUS),
+            max: feet + Vec3::new(PLAYER_RADIUS, PLAYER_HEIGHT, PLAYER_RADIUS),
+        }
+    }
+
+    fn block(pos: world::BlockPos) -> Self {
+        let min = Vec3::new(pos.0 as f32, pos.1 as f32, pos.2 as f32);
+        Self {
+            min,
+            max: min + Vec3::ONE,
+        }
+    }
+
+    fn expand(self, movement: Vec3) -> Self {
+        Self {
+            min: self.min + movement.min(Vec3::ZERO),
+            max: self.max + movement.max(Vec3::ZERO),
+        }
+    }
+
+    fn moved(self, movement: Vec3) -> Self {
+        Self {
+            min: self.min + movement,
+            max: self.max + movement,
+        }
+    }
+
+    fn intersects(self, other: Self) -> bool {
+        self.max.x > other.min.x
+            && self.min.x < other.max.x
+            && self.max.y > other.min.y
+            && self.min.y < other.max.y
+            && self.max.z > other.min.z
+            && self.min.z < other.max.z
+    }
+
+    fn clip_x(self, moving: Self, mut amount: f32) -> f32 {
+        if moving.max.y <= self.min.y
+            || moving.min.y >= self.max.y
+            || moving.max.z <= self.min.z
+            || moving.min.z >= self.max.z
+        {
+            return amount;
+        }
+        if amount > 0.0 && moving.max.x <= self.min.x {
+            amount = amount.min(self.min.x - moving.max.x);
+        } else if amount < 0.0 && moving.min.x >= self.max.x {
+            amount = amount.max(self.max.x - moving.min.x);
+        }
+        amount
+    }
+
+    fn clip_y(self, moving: Self, mut amount: f32) -> f32 {
+        if moving.max.x <= self.min.x
+            || moving.min.x >= self.max.x
+            || moving.max.z <= self.min.z
+            || moving.min.z >= self.max.z
+        {
+            return amount;
+        }
+        if amount > 0.0 && moving.max.y <= self.min.y {
+            amount = amount.min(self.min.y - moving.max.y);
+        } else if amount < 0.0 && moving.min.y >= self.max.y {
+            amount = amount.max(self.max.y - moving.min.y);
+        }
+        amount
+    }
+
+    fn clip_z(self, moving: Self, mut amount: f32) -> f32 {
+        if moving.max.x <= self.min.x
+            || moving.min.x >= self.max.x
+            || moving.max.y <= self.min.y
+            || moving.min.y >= self.max.y
+        {
+            return amount;
+        }
+        if amount > 0.0 && moving.max.z <= self.min.z {
+            amount = amount.min(self.min.z - moving.max.z);
+        } else if amount < 0.0 && moving.min.z >= self.max.z {
+            amount = amount.max(self.max.z - moving.min.z);
+        }
+        amount
+    }
+}
+
+fn block_positions(bounds: Aabb) -> impl Iterator<Item = world::BlockPos> {
+    let min_x = bounds.min.x.floor() as i32;
+    let max_x = bounds.max.x.floor() as i32 + 1;
+    let min_y = bounds.min.y.floor() as i32;
+    let max_y = bounds.max.y.floor() as i32 + 1;
+    let min_z = bounds.min.z.floor() as i32;
+    let max_z = bounds.max.z.floor() as i32 + 1;
+    (min_x..max_x).flat_map(move |x| {
+        (min_y..max_y).flat_map(move |y| (min_z..max_z).map(move |z| world::BlockPos(x, y, z)))
+    })
+}
+
+fn entity_colliders(world: &world::World, bounds: Aabb) -> Vec<Aabb> {
+    block_positions(bounds)
+        .filter_map(|pos| {
+            let outside_horizontal = pos.0 < 0
+                || pos.2 < 0
+                || pos.0 >= CLASSIC_WORLD_SIZE
+                || pos.2 >= CLASSIC_WORLD_SIZE;
+            if outside_horizontal {
+                return Some(Aabb::block(pos));
+            }
+            if pos.1 < 0 {
+                return Some(Aabb::block(pos));
+            }
+            if pos.1 >= world::CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+            is_player_solid_block(&world.get_block(pos)).then(|| Aabb::block(pos))
+        })
+        .collect()
+}
+
+fn aabb_chunks_loaded(world: &world::World, bounds: Aabb) -> bool {
+    let min =
+        world::BlockPos(bounds.min.x.floor() as i32, 0, bounds.min.z.floor() as i32).chunk_pos();
+    let max =
+        world::BlockPos(bounds.max.x.floor() as i32, 0, bounds.max.z.floor() as i32).chunk_pos();
+    (min.0..=max.0).all(|x| (min.1..=max.1).all(|z| world.is_chunk_loaded(world::ChunkPos(x, z))))
 }
 
 fn is_targetable_block(block: &block::BlockId) -> bool {
@@ -3124,7 +3393,9 @@ fn main() {
         world.drain_dirty().len(),
         world.get_block(world::BlockPos(0, 0, 0)),
     );
-    let saved_player = load_saved_game(&mut world);
+    let (saved_player, saved_mobs) = load_saved_game(&mut world)
+        .map(|(player, mobs)| (Some(player), mobs))
+        .unwrap_or_default();
     let saved_player_position = saved_player
         .as_ref()
         .map(|player| Vec3::new(player.position[0], player.position[1], player.position[2]));
@@ -3173,6 +3444,7 @@ fn main() {
         fixed_update_accumulator: Duration::ZERO,
         player_velocity: Vec3::ZERO,
         player_grounded: false,
+        player_jump_latched: false,
         player_crouching: false,
         hotbar_selected: saved_hotbar_selected,
         hotbar_slots: saved_hotbar_slots,
@@ -3192,7 +3464,8 @@ fn main() {
         water_tick: 0,
         pending_water_updates: VecDeque::new(),
         queued_water_updates: HashMap::new(),
-        classic_mobs: Vec::new(),
+        classic_mobs: saved_mobs,
+        classic_mob_random: classic_worldgen::JavaRandom::new(DEMO_WORLD_SEED ^ 0xC1A5_51C0),
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }

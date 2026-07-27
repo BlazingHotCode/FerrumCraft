@@ -46,6 +46,14 @@ pub struct Renderer {
     pub atlas: TextureAtlas,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ClassicMobRender {
+    pub position: Vec3,
+    pub heading: f32,
+    pub time_offset: f32,
+    pub brightness: f32,
+}
+
 impl Renderer {
     /// Creates the surface, selects an adapter, and initializes renderer state.
     pub async fn new(
@@ -199,60 +207,98 @@ impl Renderer {
         self.scene.set_destroy_overlay_mesh(Some(mesh));
     }
 
-    pub fn set_classic_mobs(&mut self, positions: &[Vec3]) {
-        if positions.is_empty() {
+    pub fn set_classic_mobs(&mut self, mobs: &[ClassicMobRender], animation_time: f32) {
+        if mobs.is_empty() {
             self.scene.set_classic_mob_mesh(None);
             return;
         }
         let uv = self.atlas.uv("block/stone");
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
-        for &position in positions {
+        for mob in mobs {
+            let time = animation_time + mob.time_offset;
+            let bounce = (time * 0.6662).sin().abs() * (5.0 * 0.058_333_334);
+            let root = Mat4::from_translation(mob.position + Vec3::Y * bounce)
+                * Mat4::from_rotation_y(-mob.heading + std::f32::consts::PI);
+            let head = root
+                * around_pivot(
+                    Vec3::new(0.0, 1.4, 0.0),
+                    Mat4::from_rotation_y((time * 0.83).sin())
+                        * Mat4::from_rotation_x(time.sin() * 0.8),
+                );
             push_mob_box(
                 &mut vertices,
                 &mut indices,
-                position + Vec3::new(-0.24, 1.35, -0.24),
-                Vec3::new(0.48, 0.48, 0.48),
+                Vec3::new(-0.233_333, 1.4, -0.233_333),
+                Vec3::splat(0.466_667),
                 uv,
-                [0.34, 0.68, 0.30],
+                scaled_tint([0.34, 0.68, 0.30], mob.brightness),
+                head,
             );
             push_mob_box(
                 &mut vertices,
                 &mut indices,
-                position + Vec3::new(-0.25, 0.70, -0.13),
-                Vec3::new(0.50, 0.65, 0.26),
+                Vec3::new(-0.233_333, 0.7, -0.116_667),
+                Vec3::new(0.466_667, 0.7, 0.233_333),
                 uv,
-                [0.22, 0.48, 0.68],
+                scaled_tint([0.22, 0.48, 0.68], mob.brightness),
+                root,
             );
-            for x in [-0.38, 0.25] {
+            for (x, phase, roll, side) in [
+                (-0.466_667, std::f32::consts::PI, 0.2312, 1.0),
+                (0.233_333, 0.0, 0.2812, -1.0),
+            ] {
+                let pivot = Vec3::new(x + 0.116_667, 1.283_333, 0.0);
+                let arm = root
+                    * around_pivot(
+                        pivot,
+                        Mat4::from_rotation_x((time * 0.6662 + phase).sin() * 2.0)
+                            * Mat4::from_rotation_z((time * roll).sin() + side),
+                    );
                 push_mob_box(
                     &mut vertices,
                     &mut indices,
-                    position + Vec3::new(x, 0.68, -0.10),
-                    Vec3::new(0.13, 0.66, 0.20),
+                    Vec3::new(x, 0.583_333, -0.116_667),
+                    Vec3::new(0.233_333, 0.7, 0.233_333),
                     uv,
-                    [0.34, 0.68, 0.30],
+                    scaled_tint([0.34, 0.68, 0.30], mob.brightness),
+                    arm,
                 );
             }
-            for x in [-0.22, 0.03] {
+            for (x, phase) in [(-0.233_333, 0.0), (0.0, std::f32::consts::PI)] {
+                let pivot = Vec3::new(x + 0.116_667, 0.7, 0.0);
+                let leg = root
+                    * around_pivot(
+                        pivot,
+                        Mat4::from_rotation_x((time * 0.6662 + phase).sin() * 1.4),
+                    );
                 push_mob_box(
                     &mut vertices,
                     &mut indices,
-                    position + Vec3::new(x, 0.0, -0.11),
-                    Vec3::new(0.19, 0.70, 0.22),
+                    Vec3::new(x, 0.0, -0.116_667),
+                    Vec3::new(0.233_333, 0.7, 0.233_333),
                     uv,
-                    [0.30, 0.28, 0.42],
+                    scaled_tint([0.30, 0.28, 0.42], mob.brightness),
+                    leg,
                 );
             }
         }
-        self.scene.set_classic_mob_mesh(Some(Mesh::from_vertices(
-            &self.device,
-            self.pipelines.material_layout(),
-            "Classic mob mesh",
-            [1.0; 4],
-            &vertices,
-            &indices,
-        )));
+        if let Some(mesh) = self.scene.classic_mob_mesh_mut() {
+            mesh.update(&self.queue, &vertices, &indices);
+        } else {
+            const VERTICES_PER_MOB: usize = 6 * 24;
+            const INDICES_PER_MOB: usize = 6 * 36;
+            self.scene.set_classic_mob_mesh(Some(Mesh::dynamic(
+                &self.device,
+                &self.queue,
+                self.pipelines.material_layout(),
+                "Classic mob mesh",
+                [1.0; 4],
+                &vertices,
+                &indices,
+                (256 * VERTICES_PER_MOB, 256 * INDICES_PER_MOB),
+            )));
+        }
     }
 
     /// Encodes and presents one frame.
@@ -372,6 +418,7 @@ fn push_mob_box(
     size: Vec3,
     uv: [f32; 4],
     tint: [f32; 3],
+    transform: Mat4,
 ) {
     let max = min + size;
     let [u0, v0, u1, v1] = uv;
@@ -419,7 +466,9 @@ fn push_mob_box(
             .zip([[u0, v1], [u0, v0], [u1, v0], [u1, v1]])
         {
             vertices.push(Vertex {
-                position,
+                position: transform
+                    .transform_point3(Vec3::from_array(position))
+                    .to_array(),
                 uv: tex,
                 ao: 1.0,
                 tint,
@@ -427,6 +476,14 @@ fn push_mob_box(
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
+}
+
+fn around_pivot(pivot: Vec3, rotation: Mat4) -> Mat4 {
+    Mat4::from_translation(pivot) * rotation * Mat4::from_translation(-pivot)
+}
+
+fn scaled_tint(tint: [f32; 3], brightness: f32) -> [f32; 3] {
+    tint.map(|channel| channel * brightness)
 }
 
 fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
