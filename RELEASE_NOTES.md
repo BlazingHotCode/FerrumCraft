@@ -17,7 +17,7 @@ experience of Minecraft `0.0.14a_08` with a modern Rust and wgpu engine.
 
 - Windows x86_64: setup `.exe`, standalone `.exe`, and portable `.zip`.
 - Linux x86_64: `.deb`, `.rpm`, portable `.tar.gz`, and standalone binary.
-- macOS: `.dmg` and `.zip` for Intel and Apple Silicon.
+- macOS: `.dmg` and `.zip` for Apple Silicon.
 - Source archives are generated automatically by GitHub.
 
 The portable archives and installers include their seed resources. Raw Windows
