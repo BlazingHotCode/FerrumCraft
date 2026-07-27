@@ -78,7 +78,10 @@ fn preferred_size(monitor: Option<&MonitorHandle>) -> PhysicalSize<u32> {
         return DEFAULT;
     }
 
-    let w = (width as f32 * FRACTION) as u32;
-    let h = (height as f32 * FRACTION) as u32;
+    let scale = FRACTION
+        .min(1280.0 / width as f32)
+        .min(720.0 / height as f32);
+    let w = (width as f32 * scale) as u32;
+    let h = (height as f32 * scale) as u32;
     PhysicalSize::new(w, h)
 }

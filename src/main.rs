@@ -77,7 +77,7 @@ const MAX_STACK_SIZE: u32 = 64;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
-const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
+const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
 const DEMO_WORLD_SEED: u64 = 12_345;
 const DEMO_SPAWN_CHUNK_RADIUS: i32 = 1;
 const CHUNKS_GENERATED_PER_TICK: usize = 1;
@@ -91,7 +91,7 @@ const CLASSIC_WORLD_CHUNKS: i32 = CLASSIC_WORLD_SIZE / world::CHUNK_SIZE_X as i3
 const CLASSIC_ACTION_INTERVAL: f32 = 0.25;
 const CLASSIC_SAVE_VERSION: u32 = 3;
 const CLASSIC_FAR_PLANES: [f32; 4] = [1024.0, 256.0, 64.0, 16.0];
-const CLASSIC_CHUNK_RADII: [i32; 4] = [8, 8, 4, 1];
+const CLASSIC_CHUNK_RADII: [i32; 4] = [4, 4, 2, 1];
 const WATER_LEVEL_PROPERTY: u8 = 0;
 const WATER_SOURCE_LEVEL: u8 = 0;
 const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
@@ -143,7 +143,6 @@ struct App {
     inventory_toggle_held: bool,
     mining_target: Option<world::BlockPos>,
     mining_progress: f32,
-    classic_build_mode: bool,
     classic_action_cooldown: f32,
     classic_spawn_position: Vec3,
     classic_view_distance: usize,
@@ -907,9 +906,7 @@ impl App {
             return;
         }
 
-        if self.input.take_mouse_click(MouseButton::Right) {
-            self.classic_build_mode = !self.classic_build_mode;
-        }
+        let place_requested = self.input.take_mouse_click(MouseButton::Right);
 
         if self.input.take_mouse_click(MouseButton::Middle)
             && let Some(target) = self.targeted_block()
@@ -923,6 +920,13 @@ impl App {
             if let Some(slot) = hotbar_slot_for_block(&picked) {
                 self.hotbar_selected = slot;
             }
+        }
+
+        if place_requested {
+            if let Some(target) = self.targeted_block() {
+                self.place_selected_block(target);
+            }
+            return;
         }
 
         if !self.input.is_mouse_button_pressed(MouseButton::Left) {
@@ -940,32 +944,7 @@ impl App {
             return;
         };
 
-        if self.classic_build_mode {
-            let previous = self.world.get_block(target.place_pos);
-            if !matches!(previous.0.as_str(), "" | "water" | "lava") {
-                return;
-            }
-            self.world.set_block(
-                target.place_pos,
-                block::BlockId(HOTBAR_BLOCKS[self.hotbar_selected].to_string()),
-            );
-            if HOTBAR_BLOCKS[self.hotbar_selected] != "oak_sapling"
-                && (self
-                    .camera
-                    .as_ref()
-                    .is_some_and(|camera| player_collides(&self.world, camera.position(), false))
-                    || self
-                        .classic_mobs
-                        .iter()
-                        .any(|mob| block_intersects_mob(target.place_pos, mob.position)))
-            {
-                self.world.set_block(target.place_pos, previous);
-                return;
-            }
-            self.queue_block_update_meshes(target.place_pos);
-            self.settle_falling_blocks_above(target.place_pos);
-            self.queue_water_updates_near(target.place_pos);
-        } else if self.world.get_block(target.block_pos).0 != "bedrock" {
+        if self.world.get_block(target.block_pos).0 != "bedrock" {
             self.world.set_block(
                 target.block_pos,
                 classic_break_replacement(target.block_pos),
@@ -974,6 +953,33 @@ impl App {
             self.settle_falling_blocks_above(target.block_pos);
             self.queue_water_updates_near(target.block_pos);
         }
+    }
+
+    fn place_selected_block(&mut self, target: BlockTarget) {
+        let previous = self.world.get_block(target.place_pos);
+        if !matches!(previous.0.as_str(), "" | "water" | "lava") {
+            return;
+        }
+        self.world.set_block(
+            target.place_pos,
+            block::BlockId(HOTBAR_BLOCKS[self.hotbar_selected].to_string()),
+        );
+        if HOTBAR_BLOCKS[self.hotbar_selected] != "oak_sapling"
+            && (self
+                .camera
+                .as_ref()
+                .is_some_and(|camera| player_collides(&self.world, camera.position(), false))
+                || self
+                    .classic_mobs
+                    .iter()
+                    .any(|mob| block_intersects_mob(target.place_pos, mob.position)))
+        {
+            self.world.set_block(target.place_pos, previous);
+            return;
+        }
+        self.queue_block_update_meshes(target.place_pos);
+        self.settle_falling_blocks_above(target.place_pos);
+        self.queue_water_updates_near(target.place_pos);
     }
 
     fn settle_falling_blocks_above(&mut self, changed_pos: world::BlockPos) {
@@ -3287,7 +3293,6 @@ fn main() {
         inventory_toggle_held: false,
         mining_target: None,
         mining_progress: 0.0,
-        classic_build_mode: false,
         classic_action_cooldown: 0.0,
         classic_spawn_position,
         classic_view_distance: 0,

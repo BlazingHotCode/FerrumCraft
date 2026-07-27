@@ -25,4 +25,3 @@ dirs = "5"
 # PNG image loading for block textures.
 png = "0.17"
 
-

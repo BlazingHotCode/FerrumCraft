@@ -266,8 +266,8 @@ pub struct MeshLayer {
 pub fn mesh_chunk(
     chunk: &Chunk,
     world: &World,
-    biome_source: &BiomeSource,
-    noise_settings: &NoiseSettings,
+    _biome_source: &BiomeSource,
+    _noise_settings: &NoiseSettings,
     model_map: &HashMap<String, BlockModel>,
     atlas_uv: &HashMap<String, [f32; 4]>,
 ) -> MeshData {
@@ -282,20 +282,6 @@ pub fn mesh_chunk(
     let mut transparent_off: u32 = 0;
     let chunk_block_x = chunk.pos().0 * SX as i32;
     let chunk_block_z = chunk.pos().1 * SZ as i32;
-    let biome_cache = std::array::from_fn::<_, { SX * SZ }, _>(|i| {
-        let x = i % SX;
-        let z = i / SX;
-        biome_source
-            .sample_biome_id(
-                world,
-                noise_settings,
-                chunk_block_x + x as i32,
-                chunk_block_z + z as i32,
-            )
-            .path()
-            .to_string()
-    });
-
     for y in 0..SY {
         let base_y = y * SLICE;
         for z in 0..SZ {
@@ -324,7 +310,7 @@ pub fn mesh_chunk(
                 let world_x = chunk_block_x + x as i32;
                 let world_y = y as i32;
                 let world_z = chunk_block_z + z as i32;
-                let biome = biome_cache[z * SX + x].as_str();
+                let biome = "plains";
                 if block.0 == "oak_sapling" {
                     let (uv, _) = face_uv(model, atlas_uv, Face::Front);
                     push_crossed_sapling(verts, inds, off, fx, fy, fz, uv);

@@ -126,7 +126,10 @@ impl OverlayVertex {
 pub struct OverlayRenderer {
     pipeline: wgpu::RenderPipeline,
     font: Font,
+    classic_hud_buffer: wgpu::Buffer,
 }
+
+const MAX_CLASSIC_HUD_VERTICES: usize = 32_768;
 
 impl OverlayRenderer {
     /// Creates the overlay pipeline for the swapchain format.
@@ -162,7 +165,57 @@ impl OverlayRenderer {
             cache: None,
         });
 
-        Self { pipeline, font }
+        let classic_hud_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Classic HUD vertex buffer"),
+            size: (MAX_CLASSIC_HUD_VERTICES * std::mem::size_of::<OverlayVertex>())
+                as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            pipeline,
+            font,
+            classic_hud_buffer,
+        }
+    }
+
+    pub fn encode_classic_hud(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        text: &str,
+        selected: usize,
+    ) {
+        let width = width.max(1) as f32;
+        let height = height.max(1) as f32;
+        let mut vertices = classic_text_vertices(&self.font, text, width, height);
+        push_classic_crosshair(&mut vertices, width, height);
+        push_selected_block(&mut vertices, width, height, selected);
+        debug_assert!(vertices.len() <= MAX_CLASSIC_HUD_VERTICES);
+        vertices.truncate(MAX_CLASSIC_HUD_VERTICES);
+        queue.write_buffer(&self.classic_hud_buffer, 0, bytemuck::cast_slice(&vertices));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Classic HUD pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, self.classic_hud_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
     }
 
     /// Draws overlay text into the current frame after the 3D pass.
@@ -693,6 +746,82 @@ fn classic_block_color(index: usize) -> [f32; 4] {
         7 => [0.76, 0.70, 0.48, 1.0],
         _ => [0.50, 0.48, 0.45, 1.0],
     }
+}
+
+fn push_classic_crosshair(vertices: &mut Vec<OverlayVertex>, width: f32, height: f32) {
+    let cx = width * 0.5;
+    let cy = height * 0.5;
+    let shadow = [0.0, 0.0, 0.0, 0.55];
+    let color = [0.95, 0.95, 0.95, 0.9];
+    push_quad(vertices, cx - 8.0, cy, 16.0, 2.0, width, height, shadow);
+    push_quad(vertices, cx, cy - 8.0, 2.0, 16.0, width, height, shadow);
+    push_quad(
+        vertices,
+        cx - 8.0,
+        cy - 1.0,
+        16.0,
+        1.0,
+        width,
+        height,
+        color,
+    );
+    push_quad(
+        vertices,
+        cx - 1.0,
+        cy - 8.0,
+        1.0,
+        16.0,
+        width,
+        height,
+        color,
+    );
+}
+
+fn push_selected_block(
+    vertices: &mut Vec<OverlayVertex>,
+    width: f32,
+    height: f32,
+    selected: usize,
+) {
+    let cx = width - 30.0;
+    let cy = 30.0;
+    let color = classic_block_color(selected);
+    push_polygon(
+        vertices,
+        [
+            [cx, cy - 13.0],
+            [cx + 16.0, cy - 5.0],
+            [cx, cy + 3.0],
+            [cx - 16.0, cy - 5.0],
+        ],
+        width,
+        height,
+        lighten(color, 1.18),
+    );
+    push_polygon(
+        vertices,
+        [
+            [cx - 16.0, cy - 5.0],
+            [cx, cy + 3.0],
+            [cx, cy + 20.0],
+            [cx - 16.0, cy + 12.0],
+        ],
+        width,
+        height,
+        darken(color, 0.62),
+    );
+    push_polygon(
+        vertices,
+        [
+            [cx, cy + 3.0],
+            [cx + 16.0, cy - 5.0],
+            [cx + 16.0, cy + 12.0],
+            [cx, cy + 20.0],
+        ],
+        width,
+        height,
+        darken(color, 0.82),
+    );
 }
 
 fn lighten(mut color: [f32; 4], amount: f32) -> [f32; 4] {

@@ -78,9 +78,10 @@ impl Renderer {
             .await
             .expect("Failed to request device");
 
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .expect("Failed to get default surface config");
+        config.present_mode = wgpu::PresentMode::AutoNoVsync;
         log::info!(target: "renderer", "Surface config: {}x{} {:?}", config.width, config.height, config.format);
         surface.configure(&device, &config);
 
@@ -274,31 +275,14 @@ impl Renderer {
                 .encode_tint(&self.device, &mut encoder, &view, color);
         }
 
-        self.overlay.encode_crosshair(
-            &self.device,
-            &mut encoder,
-            &view,
-            self.config.width,
-            self.config.height,
-            0.0,
-        );
-
-        self.overlay.encode_selected_block(
-            &self.device,
-            &mut encoder,
-            &view,
-            self.config.width,
-            self.config.height,
-            selected_block,
-        );
-
-        self.overlay.encode_classic_text(
-            &self.device,
+        self.overlay.encode_classic_hud(
+            &self.queue,
             &mut encoder,
             &view,
             self.config.width,
             self.config.height,
             classic_text,
+            selected_block,
         );
 
         self.queue.submit(std::iter::once(encoder.finish()));
