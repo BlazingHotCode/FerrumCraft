@@ -138,16 +138,8 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS ${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-13
-            arch: x86_64
-          - runner: macos-14
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
+    name: macOS arm64
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -156,7 +148,7 @@ jobs:
       - name: Package app bundle, zip, and dmg
         run: |
           set -euo pipefail
-          name="FerrumCraft-${RELEASE_SLUG}-macos-${{ matrix.arch }}"
+          name="FerrumCraft-${RELEASE_SLUG}-macos-arm64"
           app="dist/${name}/FerrumCraft.app"
           mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
           cp target/release/ferrumcraft "${app}/Contents/MacOS/FerrumCraft-bin"
@@ -170,12 +162,12 @@ jobs:
           rm -rf "dist/${name}"
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.arch }}
+          name: macos-arm64
           path: dist/*.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.arch }}-dmg
+          name: macos-arm64-dmg
           path: dist/*.dmg
           if-no-files-found: error
 
