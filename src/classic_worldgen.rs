@@ -642,6 +642,30 @@ mod tests {
     }
 
     #[test]
+    fn classic_spawn_leaves_the_players_feet_above_the_surface() {
+        let mut terrain = Generator::new(12345, 32, 32);
+        for x in 0..terrain.width {
+            for z in 0..terrain.length {
+                for y in 0..=31 {
+                    let index = terrain.index(x, y, z);
+                    terrain.blocks[index] = STONE;
+                }
+            }
+        }
+
+        let [x, spawn_y, z] = terrain.find_spawn(54321);
+        let feet_y = spawn_y - 1;
+        assert_eq!(
+            terrain.blocks[terrain.index(x as usize, feet_y as usize, z as usize)],
+            AIR
+        );
+        assert_ne!(
+            terrain.blocks[terrain.index(x as usize, feet_y as usize - 1, z as usize)],
+            AIR
+        );
+    }
+
+    #[test]
     fn classic_air_uses_the_engine_air_id() {
         assert_eq!(block_id(AIR), BlockId::AIR);
         assert!(block_id(AIR).0.is_empty());

@@ -90,7 +90,7 @@ const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const CLASSIC_WORLD_SIZE: i32 = 512;
 const CLASSIC_WORLD_CHUNKS: i32 = CLASSIC_WORLD_SIZE / world::CHUNK_SIZE_X as i32;
 const CLASSIC_ACTION_INTERVAL: f32 = 0.25;
-const CLASSIC_SAVE_VERSION: u32 = 4;
+const CLASSIC_SAVE_VERSION: u32 = 5;
 const CLASSIC_FAR_PLANES: [f32; 4] = [1024.0, 256.0, 64.0, 16.0];
 const CLASSIC_CHUNK_RADII: [i32; 4] = [4, 4, 2, 1];
 const WATER_LEVEL_PROPERTY: u8 = 0;
@@ -2189,10 +2189,10 @@ mod early_classic_tests {
     #[test]
     fn save_version_is_read_from_header_without_parsing_chunks() {
         let header = r#"{
-            "format_version": 4,
+            "format_version": 5,
             "seed": 12345,
             "chunks": ["#;
-        assert_eq!(saved_format_version(header), Some(4));
+        assert_eq!(saved_format_version(header), Some(5));
         assert_eq!(saved_format_version("{}"), None);
     }
 }
