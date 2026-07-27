@@ -72,6 +72,9 @@ impl ClassicTerrain {
 }
 
 fn block_id(id: u8) -> BlockId {
+    if id == AIR {
+        return BlockId::AIR.clone();
+    }
     BlockId(
         match id {
             STONE => "stone",
@@ -86,7 +89,7 @@ fn block_id(id: u8) -> BlockId {
             COAL_ORE => "coal_ore",
             LOG => "oak_log",
             LEAVES => "oak_leaves",
-            _ => "air",
+            _ => "",
         }
         .to_string(),
     )
@@ -636,5 +639,11 @@ mod tests {
         assert_eq!(first.blocks, second.blocks);
         assert!(first.chunk(ChunkPos(0, 0)).is_some());
         assert!(first.chunk(ChunkPos(-1, 0)).is_none());
+    }
+
+    #[test]
+    fn classic_air_uses_the_engine_air_id() {
+        assert_eq!(block_id(AIR), BlockId::AIR);
+        assert!(block_id(AIR).0.is_empty());
     }
 }
