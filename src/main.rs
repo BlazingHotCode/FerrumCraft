@@ -21,6 +21,7 @@ mod model;
 mod registry;
 mod renderer;
 mod resource;
+mod storage;
 mod tag;
 mod window;
 mod world;
@@ -116,6 +117,7 @@ struct App {
     biome_source: worldgen::BiomeSource,
     noise_settings: worldgen::NoiseSettings,
     classic_terrain: Arc<classic_worldgen::ClassicTerrain>,
+    app_data_root: PathBuf,
     chunk_generation_tx: Option<mpsc::Sender<world::ChunkPos>>,
     generated_chunk_rx: Option<mpsc::Receiver<GeneratedChunk>>,
     mesh_generation_tx: Option<mpsc::Sender<MeshJob>>,
@@ -284,7 +286,7 @@ impl ApplicationHandler for App {
             .expect("Font must be loaded before renderer creation");
 
         // Recreate resource manager and collect texture paths from block models.
-        let resources = resource::ResourceManager::new(".");
+        let resources = resource::ResourceManager::new(&self.app_data_root);
         let block_models = self.block_models.as_ref().expect("Block models not loaded");
         let texture_paths: Vec<String> = {
             let mut paths: Vec<String> = Vec::new();
@@ -2422,7 +2424,7 @@ fn create_demo_world(
 }
 
 fn save_path() -> PathBuf {
-    PathBuf::from("saves").join("world.json")
+    storage::app_data_dir().join("saves").join("world.json")
 }
 
 fn save_game(
@@ -3415,7 +3417,9 @@ fn main() {
     log::info!(target: "startup", "FerrumCraft v{} initializing", env!("CARGO_PKG_VERSION"));
     // Set FERRUM_LOG=debug to see more detail.
 
-    let _resources = resource::ResourceManager::new(".");
+    let app_data_root = storage::initialize().expect("Failed to initialize application data");
+    log::info!(target: "storage", "Application data: {}", app_data_root.display());
+    let _resources = resource::ResourceManager::new(&app_data_root);
     let _lang_table = match lang::TranslationTable::load(&_resources, "ferrumcraft", "en_us") {
         Ok(table) => {
             log::info!(target: "lang", "Loaded {} translation entries", table.len());
@@ -3561,6 +3565,7 @@ fn main() {
         biome_source,
         noise_settings,
         classic_terrain,
+        app_data_root,
         chunk_generation_tx: None,
         generated_chunk_rx: None,
         mesh_generation_tx: None,

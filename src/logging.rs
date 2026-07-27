@@ -6,7 +6,7 @@
 //! level, the message, and an HH:MM:SS.mmm timestamp.
 //!
 //! Logs are written to stdout and to the system app data directory
-//! (`<APP_DATA>/ferrumcraft/logs/ferrumcraft_<timestamp>.log`).
+//! (`<APP_DATA>/FerrumCraft/logs/ferrumcraft_<timestamp>.log`).
 //! The log directory is created automatically on first run.
 //!
 //! Environment variable `FERRUM_LOG` controls the minimum level:
@@ -45,7 +45,7 @@ pub fn init() -> Result<(), SetLoggerError> {
     };
 
     // Determine the app data directory and create log path.
-    let app_dir = app_data_dir();
+    let app_dir = crate::storage::app_data_dir();
     let log_dir = app_dir.join(LOG_SUBDIR);
     let _ = fs::create_dir_all(&log_dir);
     let timestamp = chrono_for_filename();
@@ -71,16 +71,6 @@ pub fn init() -> Result<(), SetLoggerError> {
     }
 
     log::set_logger(&LOGGER).map(|()| log::set_max_level(level))
-}
-
-/// Returns the OS-appropriate application data directory for FerrumCraft.
-///
-/// - Windows: `%APPDATA%/FerrumCraft`
-/// - macOS: `~/Library/Application Support/com.ferrumcraft`
-/// - Linux: `~/.local/share/ferrumcraft`
-pub fn app_data_dir() -> std::path::PathBuf {
-    let base = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    base.join("FerrumCraft")
 }
 
 struct FerrumLogger;
