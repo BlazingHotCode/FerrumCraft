@@ -66,7 +66,22 @@ const PLAYER_CROUCH_EYE_HEIGHT: f32 = 1.35;
 const PLAYER_RADIUS: f32 = 0.3;
 const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
-const HOTBAR_BLOCKS: [&str; 5] = ["dirt", "stone", "oak_log", "oak_planks", "glass"];
+const HOTBAR_BLOCKS: [&str; 14] = [
+    "dirt",
+    "stone",
+    "oak_log",
+    "oak_planks",
+    "glass",
+    "sand",
+    "gravel",
+    "grass_block",
+    "oak_leaves",
+    "coal_ore",
+    "iron_ore",
+    "gold_ore",
+    "water",
+    "lava",
+];
 const HOTBAR_SIZE: usize = 9;
 const ITEM_TYPE_COUNT: usize = HOTBAR_BLOCKS.len();
 const INVENTORY_SIZE: usize = 27;
@@ -83,6 +98,7 @@ const GENERATED_MESHES_INTEGRATED_PER_TICK: usize = 1;
 const CHUNK_MESH_REBUILDS_PER_TICK: usize = 1;
 const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const WORLD_RENDER_OFFSET: f32 = 8.5;
+const EARLY_CLASSIC_LAND_RADIUS_CHUNKS: i32 = 32;
 const WATER_LEVEL_PROPERTY: u8 = 0;
 const WATER_SOURCE_LEVEL: u8 = 0;
 const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
@@ -882,6 +898,7 @@ impl App {
                 } else {
                     remove_one_from_slot(&mut self.hotbar_slots[self.hotbar_selected]);
                     self.queue_block_update_meshes(target.place_pos);
+                    self.settle_falling_blocks_above(target.place_pos);
                     self.queue_water_updates_near(target.place_pos);
                 }
             }
@@ -913,8 +930,16 @@ impl App {
             add_item_to_inventory(&mut self.hotbar_slots, &mut self.inventory_slots, item, 1);
         }
         self.queue_block_update_meshes(block_pos);
+        self.settle_falling_blocks_above(block_pos);
         self.queue_water_updates_near(block_pos);
         self.reset_mining();
+    }
+
+    fn settle_falling_blocks_above(&mut self, changed_pos: world::BlockPos) {
+        for (source, destination) in settle_falling_column(&mut self.world, changed_pos) {
+            self.queue_block_update_meshes(source);
+            self.queue_block_update_meshes(destination);
+        }
     }
 
     fn reset_mining(&mut self) {
@@ -1823,6 +1848,39 @@ mod water_tests {
     }
 }
 
+#[cfg(test)]
+mod early_classic_tests {
+    use super::*;
+
+    #[test]
+    fn sand_and_gravel_fall_instantly_to_lowest_air_block() {
+        for block_id in ["sand", "gravel"] {
+            let mut world = world::World::new();
+            world.set_block(
+                world::BlockPos(8, 1, 8),
+                block::BlockId("stone".to_string()),
+            );
+            world.set_block(
+                world::BlockPos(8, 8, 8),
+                block::BlockId(block_id.to_string()),
+            );
+
+            let moved = settle_falling_column(&mut world, world::BlockPos(8, 8, 8));
+            assert_eq!(
+                moved,
+                vec![(world::BlockPos(8, 8, 8), world::BlockPos(8, 2, 8))]
+            );
+            assert_eq!(world.get_block(world::BlockPos(8, 2, 8)).0, block_id);
+        }
+    }
+
+    #[test]
+    fn bedrock_is_unbreakable_and_not_in_item_catalog() {
+        assert!(block_break_seconds(&block::BlockId("bedrock".to_string())).is_infinite());
+        assert!(hotbar_slot_for_block(&block::BlockId("bedrock".to_string())).is_none());
+    }
+}
+
 fn start_chunk_generation_worker(
     seed: u64,
     feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
@@ -1973,10 +2031,24 @@ fn generate_worldgen_chunk(
 ) {
     let id = |s: &str| block::BlockId(s.to_string());
 
+    if chunk_pos.0.abs().max(chunk_pos.1.abs()) > EARLY_CLASSIC_LAND_RADIUS_CHUNKS {
+        worldgen::generate_surrounding_ocean(
+            world,
+            chunk_pos,
+            noise_settings,
+            id("bedrock"),
+            id("stone"),
+            id("water"),
+        );
+        return;
+    }
+
     worldgen::populate_chunk_noise(world, chunk_pos, noise_settings, id("stone"));
     worldgen::apply_surface_rules(world, chunk_pos, noise_settings, biome_source);
+    worldgen::apply_beaches(world, chunk_pos, noise_settings);
     worldgen::apply_carvers(world, chunk_pos, noise_settings);
     worldgen::apply_sea_level_water(world, chunk_pos, noise_settings, id("water"));
+    worldgen::apply_bedrock_floor(world, chunk_pos, id("bedrock"));
 
     let coal_ore = worldgen::PlacedFeature {
         configured: worldgen::ConfiguredFeature {
@@ -1984,14 +2056,14 @@ fn generate_worldgen_chunk(
             config: worldgen::FeatureConfig::Ore {
                 ore: id("coal_ore"),
                 replaceable: vec![id("stone")],
-                size: 6,
+                size: 16,
             },
         },
         placement: worldgen::PlacementConfig {
-            attempts_per_chunk: 2,
-            chance: 3,
+            attempts_per_chunk: 5,
+            chance: 2,
             salt: 5_005,
-            height: worldgen::PlacementHeight::Range { min: 1, max: 6 },
+            height: worldgen::PlacementHeight::Range { min: 2, max: 32 },
             biome_filter: Vec::new(),
         },
     };
@@ -2004,21 +2076,78 @@ fn generate_worldgen_chunk(
         chunk_pos,
     );
 
+    for (ore, size, attempts, chance, min, max, salt) in [
+        ("iron_ore", 167, 2, 2, 2, 30, 5_105),
+        ("gold_ore", 12, 3, 3, 16, 44, 5_205),
+    ] {
+        let feature = worldgen::PlacedFeature {
+            configured: worldgen::ConfiguredFeature {
+                feature_type: id::NamespacedId::ferrumcraft("ore").expect("valid feature type ID"),
+                config: worldgen::FeatureConfig::Ore {
+                    ore: id(ore),
+                    replaceable: vec![id("stone")],
+                    size,
+                },
+            },
+            placement: worldgen::PlacementConfig {
+                attempts_per_chunk: attempts,
+                chance,
+                salt,
+                height: worldgen::PlacementHeight::Range { min, max },
+                biome_filter: Vec::new(),
+            },
+        };
+        worldgen::place_placed_feature_in_chunk(
+            feature_types,
+            &feature,
+            world,
+            noise_settings,
+            biome_source,
+            chunk_pos,
+        );
+    }
+
+    let lava_lake = worldgen::PlacedFeature {
+        configured: worldgen::ConfiguredFeature {
+            feature_type: id::NamespacedId::ferrumcraft("lake").expect("valid feature type ID"),
+            config: worldgen::FeatureConfig::Lake {
+                fluid: id("lava"),
+                radius: 2,
+                depth: 1,
+            },
+        },
+        placement: worldgen::PlacementConfig {
+            attempts_per_chunk: 1,
+            chance: 12,
+            salt: 5_305,
+            height: worldgen::PlacementHeight::Range { min: 2, max: 8 },
+            biome_filter: Vec::new(),
+        },
+    };
+    worldgen::place_placed_feature_in_chunk(
+        feature_types,
+        &lava_lake,
+        world,
+        noise_settings,
+        biome_source,
+        chunk_pos,
+    );
+
     let forest_tree = worldgen::PlacedFeature {
         configured: worldgen::ConfiguredFeature {
             feature_type: id::NamespacedId::ferrumcraft("tree").expect("valid feature type ID"),
             config: worldgen::FeatureConfig::SimpleTree {
                 log: id("oak_log"),
                 leaves: id("oak_leaves"),
-                trunk_height: 3,
+                trunk_height: 4,
             },
         },
         placement: worldgen::PlacementConfig {
-            attempts_per_chunk: 1,
-            chance: 6,
+            attempts_per_chunk: 2,
+            chance: 5,
             salt: 4_004,
             height: worldgen::PlacementHeight::Surface,
-            biome_filter: vec![id::NamespacedId::ferrumcraft("forest").expect("valid biome ID")],
+            biome_filter: Vec::new(),
         },
     };
     worldgen::place_placed_feature_in_chunk(
@@ -2619,11 +2748,52 @@ fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) ->
 }
 
 fn is_player_solid_block(block: &block::BlockId) -> bool {
-    !matches!(block.0.as_str(), "" | "water" | "oak_leaves")
+    !matches!(block.0.as_str(), "" | "water" | "lava" | "oak_leaves")
 }
 
 fn is_targetable_block(block: &block::BlockId) -> bool {
-    !matches!(block.0.as_str(), "" | "water")
+    !matches!(block.0.as_str(), "" | "water" | "lava")
+}
+
+fn settle_falling_column(
+    world: &mut world::World,
+    changed_pos: world::BlockPos,
+) -> Vec<(world::BlockPos, world::BlockPos)> {
+    let top = world::CHUNK_SIZE_Y as i32 - 1;
+    let changed_block = world.get_block(changed_pos);
+    let start_y = if matches!(changed_block.0.as_str(), "sand" | "gravel") {
+        changed_pos.1
+    } else {
+        changed_pos.1 + 1
+    };
+    let mut moved = Vec::new();
+    for y in start_y.max(1)..=top {
+        let source = world::BlockPos(changed_pos.0, y, changed_pos.2);
+        let block = world.get_block(source);
+        if !matches!(block.0.as_str(), "sand" | "gravel") {
+            continue;
+        }
+
+        let mut destination_y = y;
+        while destination_y > 0
+            && world.get_block(world::BlockPos(
+                changed_pos.0,
+                destination_y - 1,
+                changed_pos.2,
+            )) == block::BlockId::AIR
+        {
+            destination_y -= 1;
+        }
+        if destination_y == y {
+            continue;
+        }
+
+        let destination = world::BlockPos(changed_pos.0, destination_y, changed_pos.2);
+        world.set_block(source, block::BlockId::AIR.clone());
+        world.set_block(destination, block);
+        moved.push((source, destination));
+    }
+    moved
 }
 
 fn hotbar_slot_for_block(block: &block::BlockId) -> Option<usize> {
@@ -2639,14 +2809,15 @@ fn block_drop(block: &block::BlockId) -> block::BlockId {
 
 fn block_break_seconds(block: &block::BlockId) -> f32 {
     match block.0.as_str() {
-        "" | "water" => 0.0,
+        "" | "water" | "lava" => 0.0,
+        "bedrock" => f32::INFINITY,
         "oak_leaves" => 0.2,
         "glass" => 0.3,
         "dirt" | "sand" => 0.5,
-        "grass_block" => 0.6,
+        "grass_block" | "gravel" => 0.6,
         "stone" => 1.5,
         "oak_log" | "oak_planks" => 2.0,
-        "coal_ore" => 3.0,
+        "coal_ore" | "iron_ore" | "gold_ore" => 3.0,
         _ => 1.0,
     }
 }

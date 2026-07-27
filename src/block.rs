@@ -260,7 +260,25 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
                     c.required_tool_tier = ToolTier::Wood;
                     c
                 },
-                WATER_PROPERTIES,
+                &[],
+            ),
+        ),
+        (
+            "bedrock",
+            BlockDefinition::block(
+                "block.bedrock",
+                true,
+                true,
+                false,
+                false,
+                f32::INFINITY,
+                0,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.drops_self = false;
+                    c
+                },
+                &[],
             ),
         ),
         (
@@ -276,6 +294,42 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
                 {
                     let mut c = BlockComponents::empty();
                     c.required_tool_tier = ToolTier::Wood;
+                    c
+                },
+                &[],
+            ),
+        ),
+        (
+            "iron_ore",
+            BlockDefinition::block(
+                "block.iron_ore",
+                true,
+                true,
+                false,
+                false,
+                3.0,
+                0,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.required_tool_tier = ToolTier::Stone;
+                    c
+                },
+                &[],
+            ),
+        ),
+        (
+            "gold_ore",
+            BlockDefinition::block(
+                "block.gold_ore",
+                true,
+                true,
+                false,
+                false,
+                3.0,
+                0,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.required_tool_tier = ToolTier::Iron;
                     c
                 },
                 &[],
@@ -328,6 +382,24 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
             ),
         ),
         (
+            "gravel",
+            BlockDefinition::block(
+                "block.gravel",
+                true,
+                true,
+                false,
+                false,
+                0.6,
+                0,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.gravity_affected = true;
+                    c
+                },
+                &[],
+            ),
+        ),
+        (
             "water",
             BlockDefinition::block(
                 "block.water",
@@ -344,7 +416,27 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
                     c.drops_self = false;
                     c
                 },
-                &[],
+                WATER_PROPERTIES,
+            ),
+        ),
+        (
+            "lava",
+            BlockDefinition::block(
+                "block.lava",
+                false,
+                false,
+                true,
+                true,
+                100.0,
+                15,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.collision_shape = CollisionShape::Empty;
+                    c.replaceable = true;
+                    c.drops_self = false;
+                    c
+                },
+                WATER_PROPERTIES,
             ),
         ),
         (

@@ -4,6 +4,8 @@
 //! features: the registry stores reusable algorithms such as `tree` or
 //! `block_column`, while configuration chooses blocks, sizes, and placement.
 
+use std::collections::HashSet;
+
 use crate::block::BlockId;
 use crate::id::NamespacedId;
 use crate::registry::Registry;
@@ -306,6 +308,17 @@ pub fn populate_chunk_noise(
     }
 }
 
+/// Replaces the bottom layer with unbreakable bedrock.
+pub fn apply_bedrock_floor(world: &mut World, chunk_pos: ChunkPos, bedrock: BlockId) {
+    let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
+    let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
+    for lx in 0..CHUNK_SIZE_X as i32 {
+        for lz in 0..CHUNK_SIZE_Z as i32 {
+            world.set_block(BlockPos(min_x + lx, 0, min_z + lz), bedrock.clone());
+        }
+    }
+}
+
 /// Returns chunk positions in the square spawn area around a center chunk.
 pub fn spawn_area_chunks(center: ChunkPos, radius: i32) -> Vec<ChunkPos> {
     let radius = radius.max(0);
@@ -338,6 +351,31 @@ pub fn apply_surface_rules(
             world.set_block(BlockPos(x, sample.height, z), surface.top);
             for y in (sample.height - 2).max(0)..sample.height {
                 world.set_block(BlockPos(x, y, z), surface.filler.clone());
+            }
+        }
+    }
+}
+
+/// Applies Early Classic one-block-thick sand and gravel beach patches.
+pub fn apply_beaches(world: &mut World, chunk_pos: ChunkPos, noise: &NoiseSettings) {
+    let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
+    let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
+    for lx in 0..CHUNK_SIZE_X as i32 {
+        for lz in 0..CHUNK_SIZE_Z as i32 {
+            let x = min_x + lx;
+            let z = min_z + lz;
+            let height = noise.sample(world, x, z).height;
+            if height > noise.sea_level {
+                continue;
+            }
+            let patch = world.seeded_range(x.div_euclid(4), z.div_euclid(4), 7_707, 0, 4);
+            let beach = if patch == 0 { "gravel" } else { "sand" };
+            let pos = BlockPos(x, height, z);
+            if matches!(
+                world.get_block(pos).0.as_str(),
+                "grass_block" | "dirt" | "stone" | "sand"
+            ) {
+                world.set_block(pos, BlockId(beach.to_string()));
             }
         }
     }
@@ -391,6 +429,34 @@ pub fn apply_sea_level_water(
                 if world.get_block(pos) == BlockId::AIR {
                     world.set_block(pos, water.clone());
                 }
+            }
+        }
+    }
+}
+
+/// Generates the ocean that surrounds the finite Early Classic landmass.
+pub fn generate_surrounding_ocean(
+    world: &mut World,
+    chunk_pos: ChunkPos,
+    noise: &NoiseSettings,
+    bedrock: BlockId,
+    stone: BlockId,
+    water: BlockId,
+) {
+    world.load_chunk(chunk_pos);
+    let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
+    let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
+    let floor_y = (noise.sea_level - 4).max(1);
+    for lx in 0..CHUNK_SIZE_X as i32 {
+        for lz in 0..CHUNK_SIZE_Z as i32 {
+            let x = min_x + lx;
+            let z = min_z + lz;
+            world.set_block(BlockPos(x, 0, z), bedrock.clone());
+            for y in 1..=floor_y {
+                world.set_block(BlockPos(x, y, z), stone.clone());
+            }
+            for y in floor_y + 1..=noise.sea_level {
+                world.set_block(BlockPos(x, y, z), water.clone());
             }
         }
     }
@@ -671,16 +737,44 @@ fn place_tree(world: &mut World, origin: BlockPos, config: &FeatureConfig) {
         return;
     };
 
+    if !matches!(
+        world
+            .get_block(BlockPos(origin.0, origin.1 - 1, origin.2))
+            .0
+            .as_str(),
+        "grass_block" | "dirt"
+    ) {
+        return;
+    }
+    for y in 0..=*trunk_height + 2 {
+        if world.get_block(BlockPos(origin.0, origin.1 + y, origin.2)) != BlockId::AIR {
+            return;
+        }
+    }
     for y in 0..*trunk_height {
         world.set_block(BlockPos(origin.0, origin.1 + y, origin.2), log.clone());
     }
 
     let canopy_y = origin.1 + trunk_height - 1;
-    world.set_block(BlockPos(origin.0 - 1, canopy_y, origin.2), leaves.clone());
-    world.set_block(BlockPos(origin.0 + 1, canopy_y, origin.2), leaves.clone());
-    world.set_block(BlockPos(origin.0, canopy_y, origin.2 - 1), leaves.clone());
-    world.set_block(BlockPos(origin.0, canopy_y, origin.2 + 1), leaves.clone());
-    world.set_block(BlockPos(origin.0, canopy_y + 1, origin.2), leaves.clone());
+    for dy in 0..=1 {
+        for dx in -2i32..=2 {
+            for dz in -2i32..=2 {
+                if dx.abs() == 2 && dz.abs() == 2 {
+                    continue;
+                }
+                let pos = BlockPos(origin.0 + dx, canopy_y + dy, origin.2 + dz);
+                if world.get_block(pos) == BlockId::AIR {
+                    world.set_block(pos, leaves.clone());
+                }
+            }
+        }
+    }
+    for (dx, dz) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let pos = BlockPos(origin.0 + dx, canopy_y + 2, origin.2 + dz);
+        if world.get_block(pos) == BlockId::AIR {
+            world.set_block(pos, leaves.clone());
+        }
+    }
 }
 
 fn place_disk(world: &mut World, origin: BlockPos, config: &FeatureConfig) {
@@ -745,16 +839,53 @@ fn place_ore(world: &mut World, origin: BlockPos, config: &FeatureConfig) {
         return;
     };
 
-    for i in 0..(*size).max(1) {
-        let salt = 1_100 + i as u64;
-        let dx = world.seeded_range(origin.0 + i as i32, origin.2, salt, -1, 1);
-        let dy = world.seeded_range(origin.0, origin.2 + i as i32, salt + 1, -1, 1);
-        let dz = world.seeded_range(origin.0 - i as i32, origin.2, salt + 2, -1, 1);
-        let pos = BlockPos(origin.0 + dx, origin.1 + dy, origin.2 + dz);
-        let current = world.get_block(pos);
-        if replaceable.iter().any(|target| target == &current) {
+    let target_size = (*size).max(1) as usize;
+    let mut placed = HashSet::new();
+    let mut frontier = vec![origin];
+    let mut attempts = 0usize;
+    while placed.len() < target_size && attempts < target_size * 24 {
+        let base = frontier[world.seeded_range(
+            origin.0 + attempts as i32,
+            origin.2,
+            1_100 + attempts as u64,
+            0,
+            frontier.len() as i32 - 1,
+        ) as usize];
+        let directions = [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ];
+        let direction = directions[world.seeded_range(
+            base.0,
+            base.2,
+            2_200 + attempts as u64,
+            0,
+            directions.len() as i32 - 1,
+        ) as usize];
+        let pos = if attempts == 0 {
+            origin
+        } else {
+            BlockPos(
+                base.0 + direction.0,
+                base.1 + direction.1,
+                base.2 + direction.2,
+            )
+        };
+        if (1..CHUNK_SIZE_Y as i32).contains(&pos.1)
+            && !placed.contains(&pos)
+            && replaceable
+                .iter()
+                .any(|target| target == &world.get_block(pos))
+        {
             world.set_block(pos, ore.clone());
+            placed.insert(pos);
+            frontier.push(pos);
         }
+        attempts += 1;
     }
 }
 
@@ -874,6 +1005,74 @@ mod tests {
         assert_eq!(
             world.get_block(BlockPos(x, sample.height - 1, z)),
             expected.filler
+        );
+    }
+
+    #[test]
+    fn bedrock_floor_replaces_bottom_layer() {
+        let mut world = World::with_seed(12345);
+        let noise = NoiseSettings::demo();
+        let chunk_pos = ChunkPos(0, 0);
+        populate_chunk_noise(&mut world, chunk_pos, &noise, BlockId("stone".to_string()));
+        apply_bedrock_floor(&mut world, chunk_pos, BlockId("bedrock".to_string()));
+
+        for x in 0..CHUNK_SIZE_X as i32 {
+            for z in 0..CHUNK_SIZE_Z as i32 {
+                assert_eq!(world.get_block(BlockPos(x, 0, z)).0, "bedrock");
+            }
+        }
+    }
+
+    #[test]
+    fn beaches_replace_only_surface_layer() {
+        let mut world = World::with_seed(12345);
+        let noise = NoiseSettings::demo();
+        let source = BiomeSource::demo();
+        let chunk_pos = (-12..=12)
+            .flat_map(|cx| (-4..=4).map(move |cz| ChunkPos(cx, cz)))
+            .find(|chunk_pos| {
+                let x = chunk_pos.0 * CHUNK_SIZE_X as i32;
+                let z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
+                noise.sample(&world, x, z).height <= noise.sea_level
+            })
+            .expect("demo noise should create beach-height terrain");
+        populate_chunk_noise(&mut world, chunk_pos, &noise, BlockId("stone".to_string()));
+        apply_surface_rules(&mut world, chunk_pos, &noise, &source);
+
+        let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
+        let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
+        let (x, z, height) = (0..CHUNK_SIZE_X as i32)
+            .flat_map(|lx| (0..CHUNK_SIZE_Z as i32).map(move |lz| (min_x + lx, min_z + lz)))
+            .map(|(x, z)| (x, z, noise.sample(&world, x, z).height))
+            .find(|(_, _, height)| *height <= noise.sea_level)
+            .expect("selected chunk should contain a beach column");
+        let filler_before = world.get_block(BlockPos(x, height - 1, z));
+        apply_beaches(&mut world, chunk_pos, &noise);
+        assert!(matches!(
+            world.get_block(BlockPos(x, height, z)).0.as_str(),
+            "sand" | "gravel"
+        ));
+        assert_eq!(world.get_block(BlockPos(x, height - 1, z)), filler_before);
+    }
+
+    #[test]
+    fn surrounding_ocean_has_bedrock_floor_and_water_surface() {
+        let mut world = World::with_seed(12345);
+        let noise = NoiseSettings::demo();
+        generate_surrounding_ocean(
+            &mut world,
+            ChunkPos(40, 0),
+            &noise,
+            BlockId("bedrock".to_string()),
+            BlockId("stone".to_string()),
+            BlockId("water".to_string()),
+        );
+        let x = 40 * CHUNK_SIZE_X as i32;
+        assert_eq!(world.get_block(BlockPos(x, 0, 0)).0, "bedrock");
+        assert_eq!(world.get_block(BlockPos(x, noise.sea_level, 0)).0, "water");
+        assert_eq!(
+            world.get_block(BlockPos(x, noise.sea_level + 1, 0)),
+            BlockId::AIR
         );
     }
 
