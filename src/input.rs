@@ -108,6 +108,11 @@ impl InputState {
         self.just_pressed_keys.contains(&key)
     }
 
+    /// Returns and consumes whether a physical key was pressed this frame.
+    pub fn take_key_press(&mut self, key: KeyCode) -> bool {
+        self.just_pressed_keys.remove(&key)
+    }
+
     /// Returns whether F3 is currently held for debug key chords.
     pub fn is_f3_pressed(&self) -> bool {
         self.pressed_keys.contains(&KeyCode::F3)
@@ -196,5 +201,19 @@ impl InputState {
         self.f3_chord_pressed = false;
         self.cursor_delta = (0.0, 0.0);
         self.scroll_delta = 0.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_press_is_consumed_once() {
+        let mut input = InputState::default();
+        input.just_pressed_keys.insert(KeyCode::Enter);
+
+        assert!(input.take_key_press(KeyCode::Enter));
+        assert!(!input.take_key_press(KeyCode::Enter));
     }
 }

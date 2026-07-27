@@ -186,6 +186,9 @@ impl World {
     ///
     /// Returns `BlockId::AIR` if the chunk is not loaded.
     pub fn get_block(&self, pos: BlockPos) -> BlockId {
+        if !(0..CHUNK_SIZE_Y as i32).contains(&pos.1) {
+            return BlockId::AIR;
+        }
         let cp = pos.chunk_pos();
         let (lx, ly, lz) = pos.local();
         self.chunks
@@ -197,6 +200,9 @@ impl World {
     ///
     /// The chunk will be created with air if not already loaded.
     pub fn set_block(&mut self, pos: BlockPos, id: BlockId) {
+        if !(0..CHUNK_SIZE_Y as i32).contains(&pos.1) {
+            return;
+        }
         let cp = pos.chunk_pos();
         let (lx, ly, lz) = pos.local();
         let chunk = self.chunks.entry(cp).or_insert_with(|| {
@@ -271,7 +277,9 @@ impl World {
     /// Unloads a chunk into the in-memory cache and drops any pending dirty marker for it.
     pub fn unload_chunk(&mut self, pos: ChunkPos) -> bool {
         if let Some(chunk) = self.chunks.remove(&pos) {
-            self.cached_chunks.insert(pos, chunk);
+            if self.persistent_chunks.contains(&pos) {
+                self.cached_chunks.insert(pos, chunk);
+            }
             self.dirty_chunks.retain(|dirty| *dirty != pos);
             true
         } else {
@@ -332,6 +340,9 @@ impl World {
     ///
     /// Returns 0 (default) if the chunk is not loaded or no override exists.
     pub fn get_block_property(&self, pos: BlockPos, prop_idx: u8) -> u8 {
+        if !(0..CHUNK_SIZE_Y as i32).contains(&pos.1) {
+            return 0;
+        }
         let cp = pos.chunk_pos();
         let (lx, ly, lz) = pos.local();
         self.chunks
@@ -341,6 +352,9 @@ impl World {
 
     /// Sets a block property value at an absolute world position.
     pub fn set_block_property(&mut self, pos: BlockPos, prop_idx: u8, value_idx: u8) {
+        if !(0..CHUNK_SIZE_Y as i32).contains(&pos.1) {
+            return;
+        }
         let cp = pos.chunk_pos();
         let (lx, ly, lz) = pos.local();
         let chunk = self.chunks.entry(cp).or_insert_with(|| {
@@ -402,6 +416,19 @@ mod tests {
     }
 
     #[test]
+    fn world_rejects_out_of_range_vertical_access() {
+        let mut world = World::new();
+        world.set_block(BlockPos(2, 0, 3), BlockId("stone".to_string()));
+        world.set_block(BlockPos(2, 64, 3), BlockId("dirt".to_string()));
+        world.set_block_property(BlockPos(2, -1, 3), 0, 7);
+
+        assert_eq!(world.get_block(BlockPos(2, -1, 3)), BlockId::AIR);
+        assert_eq!(world.get_block(BlockPos(2, 64, 3)), BlockId::AIR);
+        assert_eq!(world.get_block(BlockPos(2, 0, 3)).0, "stone");
+        assert_eq!(world.get_block_property(BlockPos(2, -1, 3), 0), 0);
+    }
+
+    #[test]
     fn world_tracks_dirty_chunks() {
         let mut w = World::new();
         w.set_block(BlockPos(0, 0, 0), BlockId("stone".to_string()));
@@ -454,6 +481,17 @@ mod tests {
 
         world.insert_chunk(Chunk::new(ChunkPos(1, 0)));
         assert_eq!(world.persistent_chunks().count(), 2);
+    }
+
+    #[test]
+    fn reproducible_chunks_are_discarded_when_unloaded() {
+        let mut world = World::new();
+        let pos = ChunkPos(2, 3);
+        world.insert_generated_chunk(Chunk::new(pos));
+
+        assert!(world.unload_chunk(pos));
+        assert!(!world.is_chunk_cached(pos));
+        assert_eq!(world.cached_chunk_count(), 0);
     }
 
     #[test]

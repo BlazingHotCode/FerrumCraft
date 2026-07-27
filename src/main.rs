@@ -27,8 +27,8 @@ mod world;
 mod worldgen;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::Read;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -90,7 +90,7 @@ const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const CLASSIC_WORLD_SIZE: i32 = 512;
 const CLASSIC_WORLD_CHUNKS: i32 = CLASSIC_WORLD_SIZE / world::CHUNK_SIZE_X as i32;
 const CLASSIC_ACTION_INTERVAL: f32 = 0.25;
-const CLASSIC_SAVE_VERSION: u32 = 5;
+const CLASSIC_SAVE_VERSION: u32 = 6;
 const CLASSIC_FAR_PLANES: [f32; 4] = [1024.0, 256.0, 64.0, 16.0];
 const CLASSIC_CHUNK_RADII: [i32; 4] = [4, 4, 2, 1];
 const WATER_LEVEL_PROPERTY: u8 = 0;
@@ -227,6 +227,8 @@ struct SaveMob {
 #[derive(serde::Deserialize, serde::Serialize)]
 struct SavePlayer {
     position: [f32; 3],
+    #[serde(default)]
+    spawn_position: Option<[f32; 3]>,
     hotbar_selected: usize,
     #[serde(default)]
     hotbar_counts: Vec<u32>,
@@ -590,7 +592,7 @@ impl App {
 
                     if self.world.is_chunk_cached(chunk_pos) {
                         self.world.load_chunk(chunk_pos);
-                        self.queue_chunk_mesh_rebuild(chunk_pos);
+                        self.queue_chunk_meshes_near(chunk_pos);
                     } else {
                         let Some(chunk_generation_tx) = &self.chunk_generation_tx else {
                             continue;
@@ -625,13 +627,16 @@ impl App {
             };
 
             self.pending_chunk_generations.remove(&generated.pos);
-            if self.world.is_chunk_loaded(generated.pos) {
+            if self.world.is_chunk_loaded(generated.pos)
+                || self.world.is_chunk_cached(generated.pos)
+            {
                 continue;
             }
 
             let pos = generated.pos;
             self.world.insert_generated_chunk(generated.chunk);
             self.set_chunk_mesh_from_data(pos, generated.mesh);
+            self.queue_chunk_meshes_near(pos);
             integrated += 1;
         }
 
@@ -688,6 +693,7 @@ impl App {
             self.pending_mesh_generations.remove(&generated.pos);
             if self.queued_mesh_rebuilds.contains(&generated.pos) {
                 self.pending_mesh_rebuilds.push_front(generated.pos);
+                continue;
             }
             let distance = (generated.pos.0 - center_chunk.0)
                 .abs()
@@ -739,7 +745,6 @@ impl App {
                     renderer.remove_chunk_mesh(chunk_pos);
                 }
                 self.queued_mesh_rebuilds.remove(&chunk_pos);
-                self.pending_mesh_generations.remove(&chunk_pos);
                 unloaded += 1;
             }
         }
@@ -853,7 +858,7 @@ impl App {
     }
 
     fn handle_classic_keys(&mut self) {
-        if self.input.was_key_just_pressed(KeyCode::KeyF) {
+        if self.input.take_key_press(KeyCode::KeyF) {
             self.classic_view_distance =
                 (self.classic_view_distance + 1) % CLASSIC_FAR_PLANES.len();
             self.render_distance_chunks = CLASSIC_CHUNK_RADII[self.classic_view_distance];
@@ -869,21 +874,21 @@ impl App {
                 }
             }
         }
-        if self.input.was_key_just_pressed(KeyCode::KeyY)
+        if self.input.take_key_press(KeyCode::KeyY)
             && let Some(camera) = &mut self.camera
         {
             camera.toggle_invert_mouse();
         }
-        if self.input.was_key_just_pressed(KeyCode::KeyR) {
+        if self.input.take_key_press(KeyCode::KeyR) {
             self.respawn_player();
         }
-        if self.input.was_key_just_pressed(KeyCode::Enter) {
+        if self.input.take_key_press(KeyCode::Enter) {
             if let Some(camera) = &self.camera {
-                self.classic_spawn_position = camera.position().floor();
+                self.classic_spawn_position = camera.position();
             }
             self.respawn_player();
         }
-        if self.input.was_key_just_pressed(KeyCode::KeyG) && self.classic_mobs.len() < 256 {
+        if self.input.take_key_press(KeyCode::KeyG) && self.classic_mobs.len() < 256 {
             if let Some(camera) = &self.camera {
                 // Zombie.setPos centers its initial 1.8-high box on the player's eye Y.
                 let position = camera.position() - Vec3::Y * (PLAYER_HEIGHT * 0.5);
@@ -910,7 +915,7 @@ impl App {
         self.player_velocity = Vec3::ZERO;
         self.player_grounded = false;
         self.player_jump_latched = false;
-        self.player_overlap_recovery_pending = false;
+        self.player_overlap_recovery_pending = true;
     }
 
     fn update_classic_mobs(&mut self) {
@@ -1344,7 +1349,7 @@ impl App {
         .into_iter()
         .enumerate()
         {
-            if self.input.was_key_just_pressed(key) {
+            if self.input.take_key_press(key) {
                 self.hotbar_selected = index;
             }
         }
@@ -1417,6 +1422,7 @@ impl App {
             self.hotbar_selected,
             self.hotbar_slots,
             self.inventory_slots,
+            self.classic_spawn_position,
             &self.classic_mobs,
         ) {
             Ok(()) => {
@@ -2196,12 +2202,30 @@ mod early_classic_tests {
     }
 
     #[test]
+    fn setting_spawn_preserves_the_non_overlapping_eye_position() {
+        let mut world = world::World::new();
+        world.set_block(
+            world::BlockPos(8, 0, 8),
+            block::BlockId("stone".to_string()),
+        );
+        let grounded_eye = Vec3::new(8.5, 1.0 + PLAYER_EYE_HEIGHT, 8.5);
+
+        assert!(!player_collides(&world, grounded_eye, false));
+        assert!(player_collides(&world, grounded_eye.floor(), false));
+        assert!(valid_player_eye_position(grounded_eye));
+        let (landed_eye, _, grounded, _) =
+            move_player_with_collisions(&world, grounded_eye, Vec3::new(0.0, -0.08, 0.0));
+        assert_eq!(landed_eye, grounded_eye);
+        assert!(grounded);
+    }
+
+    #[test]
     fn save_version_is_read_from_header_without_parsing_chunks() {
         let header = r#"{
-            "format_version": 5,
+            "format_version": 6,
             "seed": 12345,
             "chunks": ["#;
-        assert_eq!(saved_format_version(header), Some(5));
+        assert_eq!(saved_format_version(header), Some(6));
         assert_eq!(saved_format_version("{}"), None);
     }
 }
@@ -2407,6 +2431,7 @@ fn save_game(
     hotbar_selected: usize,
     hotbar_slots: [InventorySlot; HOTBAR_SIZE],
     inventory_slots: [InventorySlot; INVENTORY_SIZE],
+    spawn_position: Vec3,
     mobs: &[ClassicMob],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let save = SaveGame {
@@ -2414,6 +2439,7 @@ fn save_game(
         seed: world.seed(),
         player: SavePlayer {
             position: [player_position.x, player_position.y, player_position.z],
+            spawn_position: Some(spawn_position.to_array()),
             hotbar_selected,
             hotbar_counts: hotbar_counts_from_slots(&hotbar_slots).to_vec(),
             hotbar_slots: hotbar_slots.to_vec(),
@@ -2444,12 +2470,45 @@ fn save_game(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(&save)?)?;
+    write_save_atomically(&path, &serde_json::to_string_pretty(&save)?)?;
+    Ok(())
+}
+
+fn write_save_atomically(path: &Path, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let temporary = path.with_extension("json.tmp");
+    let backup = path.with_extension("json.bak");
+    let mut file = std::fs::File::create(&temporary)?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
+
+    if path.exists() {
+        if backup.exists() {
+            std::fs::remove_file(&backup)?;
+        }
+        std::fs::rename(path, &backup)?;
+    }
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        if backup.exists() {
+            let _ = std::fs::rename(&backup, path);
+        }
+        return Err(error.into());
+    }
+    if backup.exists()
+        && let Err(error) = std::fs::remove_file(&backup)
+    {
+        log::warn!(target: "save", "Failed to remove save backup {:?}: {error}", backup);
+    }
     Ok(())
 }
 
 fn load_saved_game(world: &mut world::World) -> Option<(SavePlayer, Vec<ClassicMob>)> {
-    let path = save_path();
+    let primary_path = save_path();
+    let backup_path = primary_path.with_extension("json.bak");
+    let path = if primary_path.exists() {
+        primary_path
+    } else {
+        backup_path
+    };
     let mut header = String::new();
     let mut file = match std::fs::File::open(&path) {
         Ok(file) => file,
@@ -2521,6 +2580,14 @@ fn load_saved_game(world: &mut world::World) -> Option<(SavePlayer, Vec<ClassicM
     let mobs = save
         .mobs
         .into_iter()
+        .filter(|mob| {
+            mob.position.iter().all(|value| value.is_finite())
+                && mob.velocity.iter().all(|value| value.is_finite())
+                && mob.heading.is_finite()
+                && mob.turn_velocity.is_finite()
+                && mob.time_offset.is_finite()
+        })
+        .take(256)
         .map(|mob| {
             let position = Vec3::from_array(mob.position);
             ClassicMob {
@@ -3044,6 +3111,16 @@ fn resolve_player_overlap(world: &world::World, mut eye_position: Vec3) -> Vec3 
     eye_position
 }
 
+fn valid_player_eye_position(position: Vec3) -> bool {
+    position.is_finite()
+        && position.x >= PLAYER_RADIUS
+        && position.x < CLASSIC_WORLD_SIZE as f32 - PLAYER_RADIUS
+        && position.z >= PLAYER_RADIUS
+        && position.z < CLASSIC_WORLD_SIZE as f32 - PLAYER_RADIUS
+        && position.y >= PLAYER_EYE_HEIGHT
+        && position.y < world::CHUNK_SIZE_Y as f32 + 64.0
+}
+
 fn is_player_solid_block(block: &block::BlockId) -> bool {
     !matches!(block.0.as_str(), "" | "water" | "lava" | "oak_sapling")
 }
@@ -3080,7 +3157,12 @@ struct Aabb {
 
 impl Aabb {
     fn player(eye: Vec3) -> Self {
-        Self::feet(eye - Vec3::Y * PLAYER_EYE_HEIGHT)
+        let mut feet = eye - Vec3::Y * PLAYER_EYE_HEIGHT;
+        let block_boundary = feet.y.round();
+        if (feet.y - block_boundary).abs() < 1.0e-4 {
+            feet.y = block_boundary;
+        }
+        Self::feet(feet)
     }
 
     fn feet(feet: Vec3) -> Self {
@@ -3206,8 +3288,12 @@ fn entity_colliders(world: &world::World, bounds: Aabb) -> Vec<Aabb> {
 fn aabb_chunks_loaded(world: &world::World, bounds: Aabb) -> bool {
     let min =
         world::BlockPos(bounds.min.x.floor() as i32, 0, bounds.min.z.floor() as i32).chunk_pos();
-    let max =
-        world::BlockPos(bounds.max.x.floor() as i32, 0, bounds.max.z.floor() as i32).chunk_pos();
+    let max = world::BlockPos(
+        (bounds.max.x - 1.0e-4).floor() as i32,
+        0,
+        (bounds.max.z - 1.0e-4).floor() as i32,
+    )
+    .chunk_pos();
     (min.0..=max.0).all(|x| (min.1..=max.1).all(|z| world.is_chunk_loaded(world::ChunkPos(x, z))))
 }
 
@@ -3440,7 +3526,8 @@ fn main() {
         .unwrap_or_default();
     let saved_player_position = saved_player
         .as_ref()
-        .map(|player| Vec3::new(player.position[0], player.position[1], player.position[2]));
+        .map(|player| Vec3::from_array(player.position))
+        .filter(|position| valid_player_eye_position(*position));
     let player_overlap_recovery_pending = saved_player_position.is_some();
     let saved_hotbar_selected = saved_player
         .as_ref()
@@ -3451,11 +3538,16 @@ fn main() {
         .map(inventory_from_saved_player)
         .unwrap_or_default();
     let [spawn_x, spawn_y, spawn_z] = classic_terrain.spawn();
-    let classic_spawn_position = Vec3::new(
+    let generated_spawn_position = Vec3::new(
         spawn_x as f32 + 0.5,
         (spawn_y - 1) as f32 + PLAYER_EYE_HEIGHT,
         spawn_z as f32 + 0.5,
     );
+    let classic_spawn_position = saved_player
+        .as_ref()
+        .and_then(|player| player.spawn_position.map(Vec3::from_array))
+        .filter(|position| valid_player_eye_position(*position))
+        .unwrap_or(generated_spawn_position);
     let spawn_chunk = world::BlockPos(spawn_x, 0, spawn_z).chunk_pos();
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
