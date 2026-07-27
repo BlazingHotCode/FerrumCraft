@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "early-classic-0.0.14a_08"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_SLUG: early-classic-0.0.14a_08
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev
+      - run: cargo fmt -- --check
+      - run: cargo check --all-targets
+      - run: cargo test
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package portable build and installer
+        shell: pwsh
+        run: |
+          $name = "FerrumCraft-$env:RELEASE_SLUG-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "dist", "dist/$name" | Out-Null
+          Copy-Item "target/release/ferrumcraft.exe" "dist/$name/FerrumCraft.exe"
+          Copy-Item -Recurse "assets", "data" "dist/$name"
+          Copy-Item "README.md", "LICENSE" "dist/$name"
+          Compress-Archive -Path "dist/$name/*" -DestinationPath "dist/$name.zip"
+          Copy-Item "target/release/ferrumcraft.exe" "dist/$name.exe"
+
+          $iss = @"
+          [Setup]
+          AppId={{E4105CE0-B1E7-4E96-987C-6DBAF996D2DC}
+          AppName=FerrumCraft
+          AppVersion=0.1.0
+          AppPublisher=BlazingHotCode
+          DefaultDirName={autopf}\FerrumCraft
+          DefaultGroupName=FerrumCraft
+          OutputDir=dist
+          OutputBaseFilename=$name-Setup
+          Compression=lzma2
+          SolidCompression=yes
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          UninstallDisplayIcon={app}\FerrumCraft.exe
+
+          [Files]
+          Source: "target\release\ferrumcraft.exe"; DestDir: "{app}"; DestName: "FerrumCraft.exe"; Flags: ignoreversion
+          Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\FerrumCraft"; Filename: "{app}\FerrumCraft.exe"; WorkingDir: "{app}"
+          Name: "{autodesktop}\FerrumCraft"; Filename: "{app}\FerrumCraft.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
+
+          [Run]
+          Filename: "{app}\FerrumCraft.exe"; Description: "Launch FerrumCraft"; Flags: nowait postinstall skipifsilent
+          "@
+          Set-Content -Path "release.iss" -Value $iss
+          & "C:/Program Files (x86)/Inno Setup 6/ISCC.exe" "release.iss"
+          Remove-Item -Recurse -Force "dist/$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev rpm ruby-dev build-essential zip
+          sudo gem install --no-document fpm
+      - run: cargo build --release
+      - name: Package tar, deb, and rpm
+        run: |
+          set -euo pipefail
+          name="FerrumCraft-${RELEASE_SLUG}-linux-x86_64"
+          mkdir -p "dist/${name}" package-root/opt/ferrumcraft package-root/usr/bin package-root/usr/share/applications
+          cp target/release/ferrumcraft "dist/${name}/FerrumCraft"
+          cp -R assets data "dist/${name}/"
+          cp README.md LICENSE "dist/${name}/"
+          chmod +x "dist/${name}/FerrumCraft"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          cp "dist/${name}/FerrumCraft" package-root/opt/ferrumcraft/ferrumcraft
+          cp -R assets data package-root/opt/ferrumcraft/
+          cp README.md LICENSE package-root/opt/ferrumcraft/
+          printf '#!/bin/sh\nexec /opt/ferrumcraft/ferrumcraft "$@"\n' > package-root/usr/bin/ferrumcraft
+          chmod +x package-root/usr/bin/ferrumcraft package-root/opt/ferrumcraft/ferrumcraft
+          printf '[Desktop Entry]\nType=Application\nName=FerrumCraft\nComment=Early Classic 0.0.14a_08 recreation\nExec=ferrumcraft\nTerminal=false\nCategories=Game;\n' > package-root/usr/share/applications/ferrumcraft.desktop
+          mkdir -p deb-root/DEBIAN
+          cp -R package-root/* deb-root/
+          printf 'Package: ferrumcraft\nVersion: 0.1.0\nSection: games\nPriority: optional\nArchitecture: amd64\nMaintainer: BlazingHotCode\nDepends: libx11-6, libxcursor1, libxi6, libxrandr2, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0\nDescription: Early Classic 0.0.14a_08 recreation\n' > deb-root/DEBIAN/control
+          dpkg-deb --build --root-owner-group deb-root "dist/${name}.deb"
+          fpm -s dir -t rpm -n ferrumcraft -v 0.1.0 --architecture x86_64 \
+            --description "Early Classic 0.0.14a_08 recreation" \
+            --license Apache-2.0 \
+            -d libX11 -d libXcursor -d libXi -d libXrandr -d libxkbcommon -d libxkbcommon-x11 -d wayland-libs \
+            -C package-root -p "dist/${name}.rpm" .
+          cp target/release/ferrumcraft "dist/${name}.bin"
+          zip -r "dist/FerrumCraft-${RELEASE_SLUG}-resources.zip" assets data
+          rm -rf "dist/${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+          - runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package app bundle, zip, and dmg
+        run: |
+          set -euo pipefail
+          name="FerrumCraft-${RELEASE_SLUG}-macos-${{ matrix.arch }}"
+          app="dist/${name}/FerrumCraft.app"
+          mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
+          cp target/release/ferrumcraft "${app}/Contents/MacOS/FerrumCraft-bin"
+          cp -R assets data "${app}/Contents/Resources/"
+          cp README.md LICENSE "${app}/Contents/Resources/"
+          printf '#!/bin/sh\nCONTENTS="$(cd "$(dirname "$0")/.." && pwd)"\nexport FERRUMCRAFT_RESOURCE_ROOT="$CONTENTS/Resources"\nexec "$CONTENTS/MacOS/FerrumCraft-bin" "$@"\n' > "${app}/Contents/MacOS/FerrumCraft"
+          chmod +x "${app}/Contents/MacOS/FerrumCraft" "${app}/Contents/MacOS/FerrumCraft-bin"
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>FerrumCraft</string><key>CFBundleIdentifier</key><string>com.blazinghotcode.ferrumcraft</string><key>CFBundleName</key><string>FerrumCraft</string><key>CFBundleVersion</key><string>0.1.0</string><key>CFBundleShortVersionString</key><string>0.1.0</string><key>LSMinimumSystemVersion</key><string>11.0</string></dict></plist>\n' > "${app}/Contents/Info.plist"
+          ditto -c -k --sequesterRsrc --keepParent "${app}" "dist/${name}.zip"
+          hdiutil create -volname FerrumCraft -srcfolder "${app}" -ov -format UDZO "dist/${name}.dmg"
+          rm -rf "dist/${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test, windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: FerrumCraft Early Classic 0.0.14a_08
+          body_path: RELEASE_NOTES.md
+          files: dist/*
+          fail_on_unmatched_files: true
