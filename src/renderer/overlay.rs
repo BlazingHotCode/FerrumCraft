@@ -192,6 +192,9 @@ impl OverlayRenderer {
     ) {
         let width = width.max(1) as f32;
         let height = height.max(1) as f32;
+        let scale = classic_hud_scale(width, height);
+        let width = width / scale;
+        let height = height / scale;
         let mut vertices = classic_text_vertices(&self.font, text, width, height);
         push_classic_crosshair(&mut vertices, width, height);
         push_selected_block(&mut vertices, width, height, selected);
@@ -663,6 +666,10 @@ impl OverlayRenderer {
     }
 }
 
+fn classic_hud_scale(width: f32, height: f32) -> f32 {
+    (width / 1280.0).min(height / 720.0).clamp(0.5, 3.0)
+}
+
 fn hotbar_item_color(index: usize) -> [f32; 4] {
     match index {
         0 => [0.45, 0.28, 0.16, 1.0],
@@ -1025,4 +1032,22 @@ fn push_quad(
             color,
         },
     ]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classic_hud_scale_tracks_window_size() {
+        assert_eq!(classic_hud_scale(1280.0, 720.0), 1.0);
+        assert_eq!(classic_hud_scale(1920.0, 1080.0), 1.5);
+        assert_eq!(classic_hud_scale(640.0, 360.0), 0.5);
+    }
+
+    #[test]
+    fn classic_hud_scale_preserves_aspect_ratio() {
+        assert_eq!(classic_hud_scale(2560.0, 720.0), 1.0);
+        assert_eq!(classic_hud_scale(1280.0, 1440.0), 1.0);
+    }
 }
