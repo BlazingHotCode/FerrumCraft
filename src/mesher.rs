@@ -31,12 +31,7 @@ fn face_visible(current: &BlockId, neighbor: Option<&BlockId>) -> bool {
 
 fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u32>, off: &mut u32, q: Quad) {
     verts.extend_from_slice(&q.vertices);
-    let ao = q.vertices.map(|v| v.ao);
-    if ao[0] + ao[2] > ao[1] + ao[3] {
-        inds.extend_from_slice(&[*off, *off + 1, *off + 3, *off + 1, *off + 2, *off + 3]);
-    } else {
-        inds.extend_from_slice(&[*off, *off + 1, *off + 2, *off, *off + 2, *off + 3]);
-    }
+    inds.extend_from_slice(&[*off, *off + 1, *off + 2, *off, *off + 2, *off + 3]);
     *off += 4;
 }
 
@@ -78,84 +73,50 @@ fn block_at_world(world: &World, x: i32, y: i32, z: i32) -> Option<&BlockId> {
         .map(|chunk| &chunk.blocks()[ly * SZ * SX + lz * SX + lx])
 }
 
-fn occludes(world: &World, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> bool {
-    let ny = y + dy;
-    if !(0..SY as i32).contains(&ny) {
-        return false;
-    }
-
-    let block = block_at_world(world, x + dx, ny, z + dz);
-    block.is_some_and(|block| !block.0.is_empty() && !is_transparent(block))
+fn blocks_skylight(block: &BlockId) -> bool {
+    !matches!(
+        block.0.as_str(),
+        "" | "oak_leaves" | "oak_sapling" | "water" | "lava" | "glass"
+    )
 }
 
-fn vertex_ao(
-    world: &World,
-    x: i32,
+fn column_light_depth(world: &World, x: i32, z: i32) -> i32 {
+    (1..SY as i32)
+        .rev()
+        .find(|&scan_y| block_at_world(world, x, scan_y, z).is_some_and(blocks_skylight))
+        .map_or(1, |blocker_y| blocker_y + 1)
+}
+
+fn face_light(
+    light_depths: &[i32; 18 * 18],
+    local_x: usize,
     y: i32,
-    z: i32,
-    normal: [i32; 3],
-    side_a: [i32; 3],
-    side_b: [i32; 3],
-) -> f32 {
-    let side_1 = occludes(
-        world,
-        x,
-        y,
-        z,
-        normal[0] + side_a[0],
-        normal[1] + side_a[1],
-        normal[2] + side_a[2],
-    );
-    let side_2 = occludes(
-        world,
-        x,
-        y,
-        z,
-        normal[0] + side_b[0],
-        normal[1] + side_b[1],
-        normal[2] + side_b[2],
-    );
-    let corner = occludes(
-        world,
-        x,
-        y,
-        z,
-        normal[0] + side_a[0] + side_b[0],
-        normal[1] + side_a[1] + side_b[1],
-        normal[2] + side_a[2] + side_b[2],
-    );
-
-    let level = if side_1 && side_2 {
-        0
+    local_z: usize,
+    dir: u8,
+) -> [f32; 4] {
+    let (normal, shade) = match dir {
+        0 => ([1, 0, 0], 0.6),
+        1 => ([-1, 0, 0], 0.6),
+        2 => ([0, 1, 0], 1.0),
+        3 => ([0, -1, 0], 1.0),
+        4 => ([0, 0, 1], 0.8),
+        5 => ([0, 0, -1], 0.8),
+        _ => unreachable!(),
+    };
+    let neighbor_y = y + normal[1];
+    let sky_light = if !(0..SY as i32).contains(&neighbor_y) {
+        1.0
     } else {
-        3 - side_1 as u8 - side_2 as u8 - corner as u8
+        let light_x = (local_x as i32 + normal[0] + 1) as usize;
+        let light_z = (local_z as i32 + normal[2] + 1) as usize;
+        if neighbor_y >= light_depths[light_z * 18 + light_x] {
+            1.0
+        } else {
+            0.5
+        }
     };
-    [0.45, 0.62, 0.8, 1.0][level as usize]
-}
-
-fn face_ao(world: &World, x: i32, y: i32, z: i32, dir: u8) -> [f32; 4] {
-    let (normal, sides): ([i32; 3], [[i32; 3]; 4]) = match dir {
-        0 => ([1, 0, 0], [[0, -1, 0], [0, 1, 0], [0, 1, 0], [0, -1, 0]]),
-        1 => ([-1, 0, 0], [[0, -1, 0], [0, 1, 0], [0, 1, 0], [0, -1, 0]]),
-        2 => ([0, 1, 0], [[-1, 0, 0], [-1, 0, 0], [1, 0, 0], [1, 0, 0]]),
-        3 => ([0, -1, 0], [[-1, 0, 0], [-1, 0, 0], [1, 0, 0], [1, 0, 0]]),
-        4 => ([0, 0, 1], [[-1, 0, 0], [1, 0, 0], [1, 0, 0], [-1, 0, 0]]),
-        5 => ([0, 0, -1], [[1, 0, 0], [-1, 0, 0], [-1, 0, 0], [1, 0, 0]]),
-        _ => unreachable!(),
-    };
-    let other_sides: [[i32; 3]; 4] = match dir {
-        0 | 1 => [[0, 0, -1], [0, 0, -1], [0, 0, 1], [0, 0, 1]],
-        2 | 3 => [[0, 0, -1], [0, 0, 1], [0, 0, 1], [0, 0, -1]],
-        4 | 5 => [[0, -1, 0], [0, -1, 0], [0, 1, 0], [0, 1, 0]],
-        _ => unreachable!(),
-    };
-
-    [
-        vertex_ao(world, x, y, z, normal, sides[0], other_sides[0]),
-        vertex_ao(world, x, y, z, normal, sides[1], other_sides[1]),
-        vertex_ao(world, x, y, z, normal, sides[2], other_sides[2]),
-        vertex_ao(world, x, y, z, normal, sides[3], other_sides[3]),
-    ]
+    let brightness = sky_light * shade;
+    [brightness; 4]
 }
 
 fn face_uv<'a>(
@@ -268,6 +229,15 @@ pub fn mesh_chunk(
     let mut transparent_off: u32 = 0;
     let chunk_block_x = chunk.pos().0 * SX as i32;
     let chunk_block_z = chunk.pos().1 * SZ as i32;
+    let light_depths = std::array::from_fn(|index| {
+        let x = index % 18;
+        let z = index / 18;
+        column_light_depth(
+            world,
+            chunk_block_x + x as i32 - 1,
+            chunk_block_z + z as i32 - 1,
+        )
+    });
     for y in 0..SY {
         let base_y = y * SLICE;
         for z in 0..SZ {
@@ -312,7 +282,7 @@ pub fn mesh_chunk(
                 // Right (+X)
                 if face_visible(block, block_at_world(world, world_x + 1, world_y, world_z)) {
                     let (uv, texture) = face_uv(model, atlas_uv, Face::Right);
-                    let ao = face_ao(world, world_x, world_y, world_z, 0);
+                    let ao = face_light(&light_depths, x, world_y, z, 0);
                     let q = quad(
                         0,
                         fx,
@@ -328,7 +298,7 @@ pub fn mesh_chunk(
                 // Left (-X)
                 if face_visible(block, block_at_world(world, world_x - 1, world_y, world_z)) {
                     let (uv, texture) = face_uv(model, atlas_uv, Face::Left);
-                    let ao = face_ao(world, world_x, world_y, world_z, 1);
+                    let ao = face_light(&light_depths, x, world_y, z, 1);
                     let q = quad(
                         1,
                         fx,
@@ -351,7 +321,7 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         face_vertex_heights(2, top_heights),
-                        face_ao(world, world_x, world_y, world_z, 2),
+                        face_light(&light_depths, x, world_y, z, 2),
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
@@ -366,7 +336,7 @@ pub fn mesh_chunk(
                         fz,
                         uv,
                         face_vertex_heights(3, top_heights),
-                        face_ao(world, world_x, world_y, world_z, 3),
+                        face_light(&light_depths, x, world_y, z, 3),
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
@@ -374,7 +344,7 @@ pub fn mesh_chunk(
                 // Front (+Z)
                 if face_visible(block, block_at_world(world, world_x, world_y, world_z + 1)) {
                     let (uv, texture) = face_uv(model, atlas_uv, Face::Front);
-                    let ao = face_ao(world, world_x, world_y, world_z, 4);
+                    let ao = face_light(&light_depths, x, world_y, z, 4);
                     let q = quad(
                         4,
                         fx,
@@ -390,7 +360,7 @@ pub fn mesh_chunk(
                 // Back (-Z)
                 if face_visible(block, block_at_world(world, world_x, world_y, world_z - 1)) {
                     let (uv, texture) = face_uv(model, atlas_uv, Face::Back);
-                    let ao = face_ao(world, world_x, world_y, world_z, 5);
+                    let ao = face_light(&light_depths, x, world_y, z, 5);
                     let q = quad(
                         5,
                         fx,
@@ -696,5 +666,17 @@ mod tests {
 
         assert_eq!(mesh.opaque.vertices.len(), 24);
         assert_eq!(mesh.opaque.indices.len(), 36);
+    }
+
+    #[test]
+    fn classic_lighting_uses_binary_skylight_and_axis_shading() {
+        let mut light_depths = [1; 18 * 18];
+
+        assert_eq!(face_light(&light_depths, 8, 20, 8, 0), [0.6; 4]);
+        assert_eq!(face_light(&light_depths, 8, 20, 8, 4), [0.8; 4]);
+        assert_eq!(face_light(&light_depths, 8, 20, 8, 2), [1.0; 4]);
+
+        light_depths[(8 + 1) * 18 + 8 + 1] = 21;
+        assert_eq!(face_light(&light_depths, 8, 20, 8, 3), [0.5; 4]);
     }
 }

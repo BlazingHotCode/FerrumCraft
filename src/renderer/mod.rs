@@ -7,6 +7,7 @@
 pub use mesh::{Mesh, Vertex};
 pub use overlay::Font;
 pub use pipeline::RenderStats;
+pub use scene::FogEnvironment;
 pub use texture::TextureAtlas;
 
 mod material;
@@ -123,9 +124,19 @@ impl Renderer {
         self.scene.set_view_projection(view_projection);
     }
 
-    pub fn set_camera(&mut self, view_projection: Mat4, position: Vec3, fog_distance: f32) {
+    pub fn set_camera(
+        &mut self,
+        view_projection: Mat4,
+        position: Vec3,
+        forward: Vec3,
+        fog_distance: f32,
+    ) {
         self.scene
-            .set_camera(view_projection, position, fog_distance);
+            .set_camera(view_projection, position, forward, fog_distance);
+    }
+
+    pub fn set_fog_environment(&mut self, environment: FogEnvironment) {
+        self.scene.set_fog_environment(environment);
     }
 
     /// Bind group layout required for chunk mesh materials.
@@ -248,7 +259,6 @@ impl Renderer {
     pub fn render(
         &mut self,
         classic_text: &str,
-        screen_tint: Option<[f32; 4]>,
         selected_block: usize,
     ) -> Result<RenderStats, wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
@@ -269,11 +279,6 @@ impl Renderer {
             &self.depth_view,
             &self.scene,
         );
-
-        if let Some(color) = screen_tint {
-            self.overlay
-                .encode_tint(&self.device, &mut encoder, &view, color);
-        }
 
         self.overlay.encode_classic_hud(
             &self.queue,

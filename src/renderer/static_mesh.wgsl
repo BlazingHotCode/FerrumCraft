@@ -1,7 +1,10 @@
 struct Camera {
     view_projection: mat4x4<f32>,
     camera_position: vec4<f32>,
+    camera_forward: vec4<f32>,
     fog: vec4<f32>,
+    fog_color: vec4<f32>,
+    ambient: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -42,7 +45,10 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.tex_coords = input.uv;
     output.ao = input.ao;
     output.tint = input.tint;
-    output.fog_amount = clamp(distance(input.position, camera.camera_position.xyz) / camera.fog.x, 0.0, 1.0);
+    let eye_depth = max(dot(input.position - camera.camera_position.xyz, camera.camera_forward.xyz), 0.0);
+    let linear_fog = clamp(eye_depth / camera.fog.x, 0.0, 1.0);
+    let exponential_fog = 1.0 - exp(-camera.fog.y * eye_depth);
+    output.fog_amount = select(linear_fog, exponential_fog, camera.fog.z > 0.5);
     return output;
 }
 
@@ -50,9 +56,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(block_texture, texture_sampler, input.tex_coords);
     let color = tex_color * material.base_color;
-    if (color.a < 0.01) {
+    if (color.a <= 0.0001) {
         discard;
     }
-    let lit_color = color.rgb * input.tint * input.ao;
-    return vec4<f32>(mix(lit_color, vec3<f32>(0.92, 0.98, 1.0), input.fog_amount), color.a);
+    let lit_color = color.rgb * input.tint * input.ao * camera.ambient.rgb;
+    return vec4<f32>(mix(lit_color, camera.fog_color.rgb, input.fog_amount), color.a);
 }

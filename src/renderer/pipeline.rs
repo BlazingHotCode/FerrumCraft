@@ -16,7 +16,10 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 struct CameraUniform {
     view_projection: [[f32; 4]; 4],
     camera_position: [f32; 4],
+    camera_forward: [f32; 4],
     fog: [f32; 4],
+    fog_color: [f32; 4],
+    ambient: [f32; 4],
 }
 
 /// Collection of render pipelines used to draw a scene.
@@ -53,7 +56,10 @@ impl RenderPipelines {
             contents: bytemuck::bytes_of(&CameraUniform {
                 view_projection: glam::Mat4::IDENTITY.to_cols_array_2d(),
                 camera_position: [0.0; 4],
+                camera_forward: [0.0, 0.0, 1.0, 0.0],
                 fog: [1024.0, 0.0, 0.0, 0.0],
+                fog_color: [0.92, 0.98, 1.0, 1.0],
+                ambient: [1.0; 4],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -157,6 +163,23 @@ impl RenderPipelines {
         scene: &Scene,
     ) -> RenderStats {
         let mut stats = RenderStats::default();
+        let (fog, fog_color, ambient) = match scene.fog_environment() {
+            super::scene::FogEnvironment::Air => (
+                [scene.fog_distance(), 0.0, 0.0, 0.0],
+                [0.92, 0.98, 1.0, 1.0],
+                [1.0; 4],
+            ),
+            super::scene::FogEnvironment::Water => (
+                [scene.fog_distance(), 0.1, 1.0, 0.0],
+                [0.02, 0.02, 0.2, 1.0],
+                [0.3, 0.3, 0.7, 1.0],
+            ),
+            super::scene::FogEnvironment::Lava => (
+                [scene.fog_distance(), 2.0, 1.0, 0.0],
+                [0.6, 0.1, 0.0, 1.0],
+                [0.4, 0.3, 0.3, 1.0],
+            ),
+        };
 
         queue.write_buffer(
             &self.camera_buffer,
@@ -169,7 +192,15 @@ impl RenderPipelines {
                     scene.camera_position().z,
                     0.0,
                 ],
-                fog: [scene.fog_distance(), 0.0, 0.0, 0.0],
+                camera_forward: [
+                    scene.camera_forward().x,
+                    scene.camera_forward().y,
+                    scene.camera_forward().z,
+                    0.0,
+                ],
+                fog,
+                fog_color,
+                ambient,
             }),
         );
 
@@ -295,7 +326,7 @@ fn create_static_mesh_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: (!depth_write_enabled).then_some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -307,7 +338,7 @@ fn create_static_mesh_pipeline(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

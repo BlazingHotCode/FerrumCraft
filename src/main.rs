@@ -378,6 +378,7 @@ impl ApplicationHandler for App {
                         renderer.set_camera(
                             camera.view_projection(),
                             camera.position(),
+                            camera.forward(),
                             camera.far_plane(),
                         );
                     }
@@ -390,11 +391,13 @@ impl ApplicationHandler for App {
                 if let Some(renderer) = &mut self.renderer {
                     let frame_start = Instant::now();
                     let classic_text = self.debug_overlay.classic_text();
-                    let screen_tint = self
-                        .camera
-                        .as_ref()
-                        .and_then(|camera| camera_water_tint(&self.world, camera.position()));
-                    match renderer.render(&classic_text, screen_tint, self.hotbar_selected) {
+                    if let Some(camera) = &self.camera {
+                        renderer.set_fog_environment(camera_fog_environment(
+                            &self.world,
+                            camera.position(),
+                        ));
+                    }
+                    match renderer.render(&classic_text, self.hotbar_selected) {
                         Ok(stats) => {
                             self.debug_overlay
                                 .set_render_stats(stats.visible_meshes, stats.culled_meshes);
@@ -437,6 +440,7 @@ impl ApplicationHandler for App {
                 renderer.set_camera(
                     camera.view_projection(),
                     camera.position(),
+                    camera.forward(),
                     camera.far_plane(),
                 );
                 self.debug_overlay.set_player_position(camera.position());
@@ -494,6 +498,7 @@ impl App {
             renderer.set_camera(
                 camera.view_projection(),
                 camera.position(),
+                camera.forward(),
                 camera.far_plane(),
             );
             let position = camera.position();
@@ -794,6 +799,7 @@ impl App {
                 renderer.set_camera(
                     camera.view_projection(),
                     camera.position(),
+                    camera.forward(),
                     camera.far_plane(),
                 );
             }
@@ -820,6 +826,7 @@ impl App {
                     renderer.set_camera(
                         camera.view_projection(),
                         camera.position(),
+                        camera.forward(),
                         camera.far_plane(),
                     );
                 }
@@ -2604,8 +2611,17 @@ fn inventory_slot_at(x: f32, y: f32, width: u32, height: u32) -> Option<Inventor
     None
 }
 
-fn camera_water_tint(world: &world::World, position: Vec3) -> Option<[f32; 4]> {
-    water_block_at_point(world, position).map(|_| [0.0196, 0.0196, 0.2, 0.65])
+fn camera_fog_environment(world: &world::World, position: Vec3) -> renderer::FogEnvironment {
+    let block = world.get_block(world::BlockPos(
+        position.x as i32,
+        (position.y + 0.12) as i32,
+        position.z as i32,
+    ));
+    match block.0.as_str() {
+        "water" => renderer::FogEnvironment::Water,
+        "lava" => renderer::FogEnvironment::Lava,
+        _ => renderer::FogEnvironment::Air,
+    }
 }
 
 fn water_surface_height(world: &world::World, pos: world::BlockPos) -> f32 {
