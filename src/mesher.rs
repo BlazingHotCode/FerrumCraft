@@ -18,10 +18,7 @@ const WATER_LEVEL_PROPERTY: u8 = 0;
 const WATER_FALLING_LEVEL: u8 = 8;
 
 fn is_transparent(b: &BlockId) -> bool {
-    matches!(
-        b.0.as_str(),
-        "water" | "glass" | "oak_leaves" | "oak_sapling"
-    )
+    matches!(b.0.as_str(), "water" | "glass" | "oak_sapling")
 }
 
 fn face_visible(current: &BlockId, neighbor: Option<&BlockId>) -> bool {
@@ -721,5 +718,28 @@ mod tests {
                 .iter()
                 .any(|index| *index > u16::MAX as u32)
         );
+    }
+
+    #[test]
+    fn leaves_use_depth_writing_cutout_layer() {
+        let mut world = World::with_seed(12345);
+        world.set_block(BlockPos(8, 20, 8), BlockId("oak_leaves".to_string()));
+        let model = BlockModel {
+            faces: std::array::from_fn(|_| "block/oak_leaves".to_string()),
+        };
+        let models = HashMap::from([("oak_leaves".to_string(), model)]);
+        let atlas = HashMap::from([("block/oak_leaves".to_string(), [0.0, 0.0, 1.0, 1.0])]);
+        let chunk = world.chunk(crate::world::ChunkPos(0, 0)).unwrap();
+        let mesh = mesh_chunk(
+            chunk,
+            &world,
+            &BiomeSource::demo(),
+            &NoiseSettings::demo(),
+            &models,
+            &atlas,
+        );
+
+        assert!(!mesh.opaque.vertices.is_empty());
+        assert!(mesh.transparent.vertices.is_empty());
     }
 }
