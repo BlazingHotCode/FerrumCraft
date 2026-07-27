@@ -553,7 +553,7 @@ impl App {
                             .as_ref()
                             .is_some_and(|renderer| !renderer.has_chunk_mesh(chunk_pos));
                         if needs_mesh {
-                            self.queue_chunk_meshes_near(chunk_pos);
+                            self.queue_chunk_mesh_rebuild(chunk_pos);
                             requested += 1;
                             if requested >= CHUNKS_GENERATED_PER_TICK {
                                 break 'outer;
@@ -567,7 +567,7 @@ impl App {
 
                     if self.world.is_chunk_cached(chunk_pos) {
                         self.world.load_chunk(chunk_pos);
-                        self.queue_chunk_meshes_near(chunk_pos);
+                        self.queue_chunk_mesh_rebuild(chunk_pos);
                     } else {
                         let Some(chunk_generation_tx) = &self.chunk_generation_tx else {
                             continue;
@@ -668,7 +668,7 @@ impl App {
 
             self.pending_mesh_generations.remove(&generated.pos);
             if self.queued_mesh_rebuilds.contains(&generated.pos) {
-                self.pending_mesh_rebuilds.push_back(generated.pos);
+                self.pending_mesh_rebuilds.push_front(generated.pos);
             }
             let distance = (generated.pos.0 - center_chunk.0)
                 .abs()
@@ -993,8 +993,9 @@ impl App {
     }
 
     fn queue_block_update_meshes(&mut self, block_pos: world::BlockPos) {
-        let chunk_pos = block_pos.chunk_pos();
-        self.queue_chunk_meshes_near(chunk_pos);
+        for chunk_pos in block_update_chunk_positions(block_pos) {
+            self.queue_chunk_mesh_rebuild_front(chunk_pos);
+        }
     }
 
     fn queue_water_update(&mut self, pos: world::BlockPos) {
@@ -1425,6 +1426,19 @@ impl App {
         }
     }
 
+    fn queue_chunk_mesh_rebuild_front(&mut self, pos: world::ChunkPos) {
+        if self.pending_mesh_generations.contains(&pos) {
+            self.queued_mesh_rebuilds.insert(pos);
+            return;
+        }
+        if self.queued_mesh_rebuilds.insert(pos) {
+            self.pending_mesh_rebuilds.push_front(pos);
+        } else {
+            self.pending_mesh_rebuilds.retain(|queued| *queued != pos);
+            self.pending_mesh_rebuilds.push_front(pos);
+        }
+    }
+
     fn set_chunk_mesh_from_data(&mut self, pos: world::ChunkPos, data: mesher::MeshData) {
         let Some(renderer) = &mut self.renderer else {
             return;
@@ -1600,6 +1614,23 @@ fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
         block_pos.0.div_euclid(world::CHUNK_SIZE_X as i32),
         block_pos.2.div_euclid(world::CHUNK_SIZE_Z as i32),
     )
+}
+
+fn block_update_chunk_positions(block_pos: world::BlockPos) -> Vec<world::ChunkPos> {
+    let chunk_pos = block_pos.chunk_pos();
+    let (local_x, _, local_z) = block_pos.local();
+    let mut positions = vec![chunk_pos];
+    if local_x == 0 {
+        positions.push(world::ChunkPos(chunk_pos.0 - 1, chunk_pos.1));
+    } else if local_x + 1 == world::CHUNK_SIZE_X {
+        positions.push(world::ChunkPos(chunk_pos.0 + 1, chunk_pos.1));
+    }
+    if local_z == 0 {
+        positions.push(world::ChunkPos(chunk_pos.0, chunk_pos.1 - 1));
+    } else if local_z + 1 == world::CHUNK_SIZE_Z {
+        positions.push(world::ChunkPos(chunk_pos.0, chunk_pos.1 + 1));
+    }
+    positions
 }
 
 fn camera_block_pos(position: Vec3) -> world::BlockPos {
@@ -1982,6 +2013,40 @@ mod early_classic_tests {
             classic_break_replacement(world::BlockPos(1, 30, 20)),
             block::BlockId::AIR
         );
+    }
+
+    #[test]
+    fn block_updates_only_remesh_chunks_sharing_the_changed_face() {
+        assert_eq!(
+            block_update_chunk_positions(world::BlockPos(8, 20, 8)),
+            vec![world::ChunkPos(0, 0)]
+        );
+        assert_eq!(
+            block_update_chunk_positions(world::BlockPos(15, 20, 8)),
+            vec![world::ChunkPos(0, 0), world::ChunkPos(1, 0)]
+        );
+        assert_eq!(
+            block_update_chunk_positions(world::BlockPos(16, 20, 16)),
+            vec![
+                world::ChunkPos(1, 1),
+                world::ChunkPos(0, 1),
+                world::ChunkPos(1, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn placement_target_is_the_air_cell_before_the_hit_block() {
+        let mut world = world::World::new();
+        world.set_block(
+            world::BlockPos(8, 20, 10),
+            block::BlockId("stone".to_string()),
+        );
+        let target = raycast_block(&world, Vec3::new(8.5, 20.5, 8.5), Vec3::Z)
+            .expect("stone should be in Classic reach");
+
+        assert_eq!(target.block_pos, world::BlockPos(8, 20, 10));
+        assert_eq!(target.place_pos, world::BlockPos(8, 20, 9));
     }
 }
 
