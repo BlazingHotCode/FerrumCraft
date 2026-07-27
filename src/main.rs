@@ -10,6 +10,7 @@
 
 mod block;
 mod camera;
+mod classic_worldgen;
 mod debug;
 mod id;
 mod input;
@@ -89,7 +90,7 @@ const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const CLASSIC_WORLD_SIZE: i32 = 512;
 const CLASSIC_WORLD_CHUNKS: i32 = CLASSIC_WORLD_SIZE / world::CHUNK_SIZE_X as i32;
 const CLASSIC_ACTION_INTERVAL: f32 = 0.25;
-const CLASSIC_SAVE_VERSION: u32 = 3;
+const CLASSIC_SAVE_VERSION: u32 = 4;
 const CLASSIC_FAR_PLANES: [f32; 4] = [1024.0, 256.0, 64.0, 16.0];
 const CLASSIC_CHUNK_RADII: [i32; 4] = [4, 4, 2, 1];
 const WATER_LEVEL_PROPERTY: u8 = 0;
@@ -114,8 +115,7 @@ struct App {
     biomes: crate::registry::Registry<worldgen::Biome>,
     biome_source: worldgen::BiomeSource,
     noise_settings: worldgen::NoiseSettings,
-    worldgen_feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
-    structure_sets: crate::registry::Registry<worldgen::StructureSet>,
+    classic_terrain: Arc<classic_worldgen::ClassicTerrain>,
     chunk_generation_tx: Option<mpsc::Sender<world::ChunkPos>>,
     generated_chunk_rx: Option<mpsc::Receiver<GeneratedChunk>>,
     mesh_generation_tx: Option<mpsc::Sender<MeshJob>>,
@@ -302,8 +302,7 @@ impl ApplicationHandler for App {
         let atlas_uv = renderer.atlas.uv_map();
         let (chunk_generation_tx, generated_chunk_rx) = start_chunk_generation_worker(
             self.world.seed(),
-            self.worldgen_feature_types.clone(),
-            self.structure_sets.clone(),
+            Arc::clone(&self.classic_terrain),
             self.noise_settings,
             self.biome_source,
             model_map.clone(),
@@ -2056,18 +2055,17 @@ mod early_classic_tests {
     #[test]
     fn save_version_is_read_from_header_without_parsing_chunks() {
         let header = r#"{
-            "format_version": 3,
+            "format_version": 4,
             "seed": 12345,
             "chunks": ["#;
-        assert_eq!(saved_format_version(header), Some(3));
+        assert_eq!(saved_format_version(header), Some(4));
         assert_eq!(saved_format_version("{}"), None);
     }
 }
 
 fn start_chunk_generation_worker(
     seed: u64,
-    feature_types: crate::registry::Registry<worldgen::WorldgenFeatureType>,
-    structure_sets: crate::registry::Registry<worldgen::StructureSet>,
+    classic_terrain: Arc<classic_worldgen::ClassicTerrain>,
     noise_settings: worldgen::NoiseSettings,
     biome_source: worldgen::BiomeSource,
     model_map: std::collections::HashMap<String, model::BlockModel>,
@@ -2083,8 +2081,7 @@ fn start_chunk_generation_worker(
     for worker_index in 0..1 {
         let request_rx = Arc::clone(&request_rx);
         let result_tx = result_tx.clone();
-        let feature_types = feature_types.clone();
-        let structure_sets = structure_sets.clone();
+        let classic_terrain = Arc::clone(&classic_terrain);
         let model_map = model_map.clone();
         let atlas_uv = atlas_uv.clone();
         thread::Builder::new()
@@ -2103,12 +2100,20 @@ fn start_chunk_generation_worker(
                     let mut generated_world = world::World::with_seed(seed);
                     generate_worldgen_chunk(
                         &mut generated_world,
-                        &feature_types,
-                        &structure_sets,
+                        &classic_terrain,
                         &noise_settings,
-                        &biome_source,
                         chunk_pos,
                     );
+                    for neighbor in [
+                        world::ChunkPos(chunk_pos.0 + 1, chunk_pos.1),
+                        world::ChunkPos(chunk_pos.0 - 1, chunk_pos.1),
+                        world::ChunkPos(chunk_pos.0, chunk_pos.1 + 1),
+                        world::ChunkPos(chunk_pos.0, chunk_pos.1 - 1),
+                    ] {
+                        if let Some(chunk) = classic_terrain.chunk(neighbor) {
+                            generated_world.insert_generated_chunk(chunk);
+                        }
+                    }
 
                     if let Some(chunk) = generated_world.chunk(chunk_pos) {
                         let mesh = mesher::mesh_chunk(
@@ -2206,10 +2211,8 @@ fn worker_count() -> usize {
 
 fn generate_worldgen_chunk(
     world: &mut world::World,
-    feature_types: &crate::registry::Registry<worldgen::WorldgenFeatureType>,
-    structure_sets: &crate::registry::Registry<worldgen::StructureSet>,
+    classic_terrain: &classic_worldgen::ClassicTerrain,
     noise_settings: &worldgen::NoiseSettings,
-    biome_source: &worldgen::BiomeSource,
     chunk_pos: world::ChunkPos,
 ) {
     let id = |s: &str| block::BlockId(s.to_string());
@@ -2228,144 +2231,23 @@ fn generate_worldgen_chunk(
         return;
     }
 
-    worldgen::populate_chunk_noise(world, chunk_pos, noise_settings, id("stone"));
-    worldgen::apply_classic_surface_rules(world, chunk_pos, noise_settings);
-    worldgen::apply_beaches(world, chunk_pos, noise_settings);
-    worldgen::apply_carvers(world, chunk_pos, noise_settings);
-    worldgen::apply_sea_level_water(world, chunk_pos, noise_settings, id("water"));
-
-    let coal_ore = worldgen::PlacedFeature {
-        configured: worldgen::ConfiguredFeature {
-            feature_type: id::NamespacedId::ferrumcraft("ore").expect("valid feature type ID"),
-            config: worldgen::FeatureConfig::Ore {
-                ore: id("coal_ore"),
-                replaceable: vec![id("stone")],
-                size: 16,
-            },
-        },
-        placement: worldgen::PlacementConfig {
-            attempts_per_chunk: 5,
-            chance: 2,
-            salt: 5_005,
-            height: worldgen::PlacementHeight::Range { min: 2, max: 32 },
-            biome_filter: Vec::new(),
-        },
-    };
-    worldgen::place_placed_feature_in_chunk(
-        feature_types,
-        &coal_ore,
-        world,
-        noise_settings,
-        biome_source,
-        chunk_pos,
-    );
-
-    for (ore, size, attempts, chance, min, max, salt) in [
-        ("iron_ore", 167, 2, 2, 2, 30, 5_105),
-        ("gold_ore", 12, 3, 3, 16, 44, 5_205),
-    ] {
-        let feature = worldgen::PlacedFeature {
-            configured: worldgen::ConfiguredFeature {
-                feature_type: id::NamespacedId::ferrumcraft("ore").expect("valid feature type ID"),
-                config: worldgen::FeatureConfig::Ore {
-                    ore: id(ore),
-                    replaceable: vec![id("stone")],
-                    size,
-                },
-            },
-            placement: worldgen::PlacementConfig {
-                attempts_per_chunk: attempts,
-                chance,
-                salt,
-                height: worldgen::PlacementHeight::Range { min, max },
-                biome_filter: Vec::new(),
-            },
-        };
-        worldgen::place_placed_feature_in_chunk(
-            feature_types,
-            &feature,
-            world,
-            noise_settings,
-            biome_source,
-            chunk_pos,
-        );
+    if let Some(chunk) = classic_terrain.chunk(chunk_pos) {
+        world.insert_generated_chunk(chunk);
     }
-
-    let lava_lake = worldgen::PlacedFeature {
-        configured: worldgen::ConfiguredFeature {
-            feature_type: id::NamespacedId::ferrumcraft("lake").expect("valid feature type ID"),
-            config: worldgen::FeatureConfig::Lake {
-                fluid: id("lava"),
-                radius: 2,
-                depth: 1,
-            },
-        },
-        placement: worldgen::PlacementConfig {
-            attempts_per_chunk: 1,
-            chance: 12,
-            salt: 5_305,
-            height: worldgen::PlacementHeight::Range { min: 2, max: 8 },
-            biome_filter: Vec::new(),
-        },
-    };
-    worldgen::place_placed_feature_in_chunk(
-        feature_types,
-        &lava_lake,
-        world,
-        noise_settings,
-        biome_source,
-        chunk_pos,
-    );
-
-    let forest_tree = worldgen::PlacedFeature {
-        configured: worldgen::ConfiguredFeature {
-            feature_type: id::NamespacedId::ferrumcraft("tree").expect("valid feature type ID"),
-            config: worldgen::FeatureConfig::SimpleTree {
-                log: id("oak_log"),
-                leaves: id("oak_leaves"),
-                trunk_height: 4,
-            },
-        },
-        placement: worldgen::PlacementConfig {
-            attempts_per_chunk: 2,
-            chance: 5,
-            salt: 4_004,
-            height: worldgen::PlacementHeight::Surface,
-            biome_filter: Vec::new(),
-        },
-    };
-    worldgen::place_placed_feature_in_chunk(
-        feature_types,
-        &forest_tree,
-        world,
-        noise_settings,
-        biome_source,
-        chunk_pos,
-    );
-
-    let _ = structure_sets;
 }
 
 fn create_demo_world(
-    feature_types: &crate::registry::Registry<worldgen::WorldgenFeatureType>,
-    structure_sets: &crate::registry::Registry<worldgen::StructureSet>,
+    classic_terrain: &classic_worldgen::ClassicTerrain,
     noise_settings: &worldgen::NoiseSettings,
-    biome_source: &worldgen::BiomeSource,
 ) -> world::World {
     let mut world = world::World::with_seed(DEMO_WORLD_SEED);
 
-    let center = world::ChunkPos(CLASSIC_WORLD_CHUNKS / 2, CLASSIC_WORLD_CHUNKS / 2);
+    let [spawn_x, _, spawn_z] = classic_terrain.spawn();
+    let center = world::BlockPos(spawn_x, 0, spawn_z).chunk_pos();
     let spawn_chunks = worldgen::spawn_area_chunks(center, DEMO_SPAWN_CHUNK_RADIUS);
 
     for &chunk_pos in &spawn_chunks {
-        generate_worldgen_chunk(
-            &mut world,
-            feature_types,
-            structure_sets,
-            noise_settings,
-            biome_source,
-            chunk_pos,
-        );
+        generate_worldgen_chunk(&mut world, classic_terrain, noise_settings, chunk_pos);
     }
     world.clear_persistent_chunks();
 
@@ -3139,17 +3021,6 @@ fn main() {
     let biome_source = worldgen::BiomeSource::demo();
     log::info!(target: "worldgen", "Biome source: {:?}", biome_source);
     let noise_settings = worldgen::NoiseSettings::demo();
-    let worldgen_feature_types = worldgen::register_core_feature_types();
-    log::info!(target: "worldgen", "Registered {} worldgen feature types", worldgen_feature_types.len());
-    for (id, feature_type) in worldgen_feature_types.iter() {
-        log::debug!(target: "worldgen", "Feature type {id}: {}", feature_type.name());
-    }
-    let structure_sets = worldgen::register_core_structure_sets();
-    log::info!(target: "worldgen", "Registered {} structure sets", structure_sets.len());
-    for (id, structure_set) in structure_sets.iter() {
-        log::debug!(target: "worldgen", "Structure set {id}: {}", structure_set.name());
-    }
-
     // Log block component summary.
     let flammable_count = block_registry
         .iter()
@@ -3216,12 +3087,12 @@ fn main() {
     };
 
     // Create the initial generated world around spawn.
-    let mut world = create_demo_world(
-        &worldgen_feature_types,
-        &structure_sets,
-        &noise_settings,
-        &biome_source,
-    );
+    let classic_terrain = Arc::new(classic_worldgen::ClassicTerrain::generate(
+        DEMO_WORLD_SEED,
+        CLASSIC_WORLD_SIZE as usize,
+        CLASSIC_WORLD_SIZE as usize,
+    ));
+    let mut world = create_demo_world(&classic_terrain, &noise_settings);
     log::info!(target: "world", "Demo world seed: {}", world.seed());
     log::info!(target: "worldgen", "Demo noise settings: {:?}", noise_settings);
     log::info!(target: "world", "Directions: north={}, south={}, west={}, east={}, up={}, down={}",
@@ -3249,7 +3120,13 @@ fn main() {
         .as_ref()
         .map(inventory_from_saved_player)
         .unwrap_or_default();
-    let classic_spawn_position = spawn_eye_position(&world);
+    let [spawn_x, spawn_y, spawn_z] = classic_terrain.spawn();
+    let classic_spawn_position = Vec3::new(
+        spawn_x as f32 + 0.5,
+        spawn_y as f32 + PLAYER_EYE_HEIGHT,
+        spawn_z as f32 + 0.5,
+    );
+    let spawn_chunk = world::BlockPos(spawn_x, 0, spawn_z).chunk_pos();
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -3261,8 +3138,7 @@ fn main() {
         biomes,
         biome_source,
         noise_settings,
-        worldgen_feature_types,
-        structure_sets,
+        classic_terrain,
         chunk_generation_tx: None,
         generated_chunk_rx: None,
         mesh_generation_tx: None,
@@ -3296,7 +3172,7 @@ fn main() {
         saved_player_position,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
-        mesh_center_chunk: world::ChunkPos(CLASSIC_WORLD_CHUNKS / 2, CLASSIC_WORLD_CHUNKS / 2),
+        mesh_center_chunk: spawn_chunk,
         water_tick: 0,
         pending_water_updates: VecDeque::new(),
         queued_water_updates: HashMap::new(),
