@@ -278,9 +278,6 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            if seen.insert("block/grass_block_side_overlay".to_string()) {
-                paths.push("block/grass_block_side_overlay".to_string());
-            }
             for stage in 0..10 {
                 let path = format!("block/destroy_stage_{stage}");
                 if seen.insert(path.clone()) {

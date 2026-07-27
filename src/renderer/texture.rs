@@ -92,6 +92,8 @@ impl TextureAtlas {
 
             if *path == "block/water_still" {
                 apply_water_overlay(resources, namespace, &mut frames);
+            } else if *path == "block/grass_block_side" {
+                apply_grass_side_overlay(resources, namespace, &mut frames);
             }
 
             let col = i as u32 % ATLAS_COLS;
@@ -479,8 +481,17 @@ fn apply_grass_side_overlay(
     };
 
     let overlay = &mut overlay_frames[0];
+    tint_rgba(overlay, [0x91, 0xbd, 0x59]);
     for base in base_frames {
         alpha_composite(base, overlay);
+    }
+}
+
+fn tint_rgba(pixels: &mut [u8], tint: [u8; 3]) {
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel[0] = ((pixel[0] as u16 * tint[0] as u16) / 255) as u8;
+        pixel[1] = ((pixel[1] as u16 * tint[1] as u16) / 255) as u8;
+        pixel[2] = ((pixel[2] as u16 * tint[2] as u16) / 255) as u8;
     }
 }
 

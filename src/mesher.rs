@@ -176,17 +176,6 @@ fn face_uv<'a>(
     )
 }
 
-fn grass_side_overlay_offset(dir: u8) -> (f32, f32) {
-    let nudge = 0.001;
-    match dir {
-        0 => (nudge, 0.0),
-        1 => (-nudge, 0.0),
-        4 => (0.0, nudge),
-        5 => (0.0, -nudge),
-        _ => (0.0, 0.0),
-    }
-}
-
 fn water_level(world: &World, pos: BlockPos) -> Option<u8> {
     (world.get_block(pos).0 == "water")
         .then(|| world.get_block_property(pos, WATER_LEVEL_PROPERTY).min(15))
@@ -335,23 +324,6 @@ pub fn mesh_chunk(
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
-                    if texture == "block/grass_block_side" {
-                        let (dx, dz) = grass_side_overlay_offset(0);
-                        let q = quad(
-                            0,
-                            fx + dx,
-                            fy,
-                            fz + dz,
-                            atlas_uv
-                                .get("block/grass_block_side_overlay")
-                                .copied()
-                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            face_vertex_heights(0, top_heights),
-                            ao,
-                            biome_tint("block/grass_block_side_overlay", biome),
-                        );
-                        push_quad(verts, inds, off, q);
-                    }
                 }
                 // Left (-X)
                 if face_visible(block, block_at_world(world, world_x - 1, world_y, world_z)) {
@@ -368,23 +340,6 @@ pub fn mesh_chunk(
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
-                    if texture == "block/grass_block_side" {
-                        let (dx, dz) = grass_side_overlay_offset(1);
-                        let q = quad(
-                            1,
-                            fx + dx,
-                            fy,
-                            fz + dz,
-                            atlas_uv
-                                .get("block/grass_block_side_overlay")
-                                .copied()
-                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            face_vertex_heights(1, top_heights),
-                            ao,
-                            biome_tint("block/grass_block_side_overlay", biome),
-                        );
-                        push_quad(verts, inds, off, q);
-                    }
                 }
                 // Top (+Y)
                 if face_visible(block, block_at_world(world, world_x, world_y + 1, world_z)) {
@@ -431,23 +386,6 @@ pub fn mesh_chunk(
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
-                    if texture == "block/grass_block_side" {
-                        let (dx, dz) = grass_side_overlay_offset(4);
-                        let q = quad(
-                            4,
-                            fx + dx,
-                            fy,
-                            fz + dz,
-                            atlas_uv
-                                .get("block/grass_block_side_overlay")
-                                .copied()
-                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            face_vertex_heights(4, top_heights),
-                            ao,
-                            biome_tint("block/grass_block_side_overlay", biome),
-                        );
-                        push_quad(verts, inds, off, q);
-                    }
                 }
                 // Back (-Z)
                 if face_visible(block, block_at_world(world, world_x, world_y, world_z - 1)) {
@@ -464,23 +402,6 @@ pub fn mesh_chunk(
                         biome_tint(texture, biome),
                     );
                     push_quad(verts, inds, off, q);
-                    if texture == "block/grass_block_side" {
-                        let (dx, dz) = grass_side_overlay_offset(5);
-                        let q = quad(
-                            5,
-                            fx + dx,
-                            fy,
-                            fz + dz,
-                            atlas_uv
-                                .get("block/grass_block_side_overlay")
-                                .copied()
-                                .unwrap_or([0.0, 0.0, 0.0625, 0.0625]),
-                            face_vertex_heights(5, top_heights),
-                            ao,
-                            biome_tint("block/grass_block_side_overlay", biome),
-                        );
-                        push_quad(verts, inds, off, q);
-                    }
                 }
             }
         }
@@ -741,5 +662,39 @@ mod tests {
 
         assert!(!mesh.opaque.vertices.is_empty());
         assert!(mesh.transparent.vertices.is_empty());
+    }
+
+    #[test]
+    fn grass_side_overlay_does_not_add_coplanar_geometry() {
+        let mut world = World::with_seed(12345);
+        world.set_block(BlockPos(8, 20, 8), BlockId("grass_block".to_string()));
+        let model = BlockModel {
+            faces: [
+                "block/grass_block_side".to_string(),
+                "block/grass_block_side".to_string(),
+                "block/grass_block_top".to_string(),
+                "block/dirt".to_string(),
+                "block/grass_block_side".to_string(),
+                "block/grass_block_side".to_string(),
+            ],
+        };
+        let models = HashMap::from([("grass_block".to_string(), model)]);
+        let atlas = HashMap::from([
+            ("block/grass_block_side".to_string(), [0.0, 0.0, 1.0, 1.0]),
+            ("block/grass_block_top".to_string(), [0.0, 0.0, 1.0, 1.0]),
+            ("block/dirt".to_string(), [0.0, 0.0, 1.0, 1.0]),
+        ]);
+        let chunk = world.chunk(crate::world::ChunkPos(0, 0)).unwrap();
+        let mesh = mesh_chunk(
+            chunk,
+            &world,
+            &BiomeSource::demo(),
+            &NoiseSettings::demo(),
+            &models,
+            &atlas,
+        );
+
+        assert_eq!(mesh.opaque.vertices.len(), 24);
+        assert_eq!(mesh.opaque.indices.len(), 36);
     }
 }
