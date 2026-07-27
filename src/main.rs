@@ -752,6 +752,15 @@ impl App {
 
         let _ = dt;
         let mut position = camera.position();
+        if !aabb_chunks_loaded(&self.world, Aabb::player(position)) {
+            return;
+        }
+        let resolved_position = resolve_player_overlap(&self.world, position);
+        if resolved_position != position {
+            position = resolved_position;
+            self.player_velocity = Vec3::ZERO;
+            self.player_grounded = false;
+        }
         let desired_direction = player_move_direction(camera, &self.input);
         let jump_held = self.input.is_key_pressed(KeyCode::Space);
         if !jump_held {
@@ -2164,6 +2173,20 @@ mod early_classic_tests {
     }
 
     #[test]
+    fn player_physics_waits_for_terrain_and_recovers_from_overlap() {
+        let mut world = world::World::new();
+        let eye = Vec3::new(8.5, PLAYER_EYE_HEIGHT, 8.5);
+        assert!(!aabb_chunks_loaded(&world, Aabb::player(eye)));
+
+        world.set_block(
+            world::BlockPos(8, 0, 8),
+            block::BlockId("stone".to_string()),
+        );
+        assert!(aabb_chunks_loaded(&world, Aabb::player(eye)));
+        assert_eq!(resolve_player_overlap(&world, eye), eye + Vec3::Y * 1.001);
+    }
+
+    #[test]
     fn save_version_is_read_from_header_without_parsing_chunks() {
         let header = r#"{
             "format_version": 4,
@@ -3000,6 +3023,16 @@ fn player_collides(world: &world::World, eye_position: Vec3, _crouching: bool) -
     entity_colliders(world, bounds)
         .into_iter()
         .any(|collider| bounds.intersects(collider))
+}
+
+fn resolve_player_overlap(world: &world::World, mut eye_position: Vec3) -> Vec3 {
+    for _ in 0..=world::CHUNK_SIZE_Y {
+        if !player_collides(world, eye_position, false) {
+            break;
+        }
+        eye_position.y += 1.001;
+    }
+    eye_position
 }
 
 fn is_player_solid_block(block: &block::BlockId) -> bool {
