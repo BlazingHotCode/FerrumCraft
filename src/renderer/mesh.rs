@@ -146,7 +146,7 @@ impl Mesh {
         label: &str,
         base_color: [f32; 4],
         vertices: &[Vertex],
-        indices: &[u16],
+        indices: &[u32],
     ) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{label} vertex buffer")),

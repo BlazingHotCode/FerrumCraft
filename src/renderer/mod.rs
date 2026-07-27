@@ -307,7 +307,7 @@ impl Renderer {
     }
 }
 
-fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<Vertex>, Vec<u16>) {
+fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
     let [u0, v0, u1, v1] = uv;
     let inflate = 0.002;
     let min = [
@@ -323,7 +323,7 @@ fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<V
     let mut vertices = Vec::with_capacity(24);
     let mut indices = Vec::with_capacity(36);
     let mut push_face = |corners: [[f32; 3]; 4]| {
-        let base = vertices.len() as u16;
+        let base = vertices.len() as u32;
         let uvs = [[u0, v1], [u0, v0], [u1, v0], [u1, v1]];
         for (position, uv) in corners.into_iter().zip(uvs) {
             vertices.push(Vertex {
@@ -378,7 +378,7 @@ fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<V
 
 fn push_mob_box(
     vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<u16>,
+    indices: &mut Vec<u32>,
     min: Vec3,
     size: Vec3,
     uv: [f32; 4],
@@ -424,7 +424,7 @@ fn push_mob_box(
             [max.x, max.y, min.z],
         ],
     ] {
-        let base = vertices.len() as u16;
+        let base = vertices.len() as u32;
         for (position, tex) in corners
             .into_iter()
             .zip([[u0, v1], [u0, v0], [u1, v0], [u1, v1]])

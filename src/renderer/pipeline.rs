@@ -266,7 +266,7 @@ impl RenderPipelines {
             stats.visible_meshes += 1;
             pass.set_bind_group(1, mesh.material().bind_group(), &[]);
             pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-            pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint16);
+            pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
         }
     }

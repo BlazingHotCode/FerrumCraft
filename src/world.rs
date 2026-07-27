@@ -8,7 +8,7 @@
 //! blocks through the world API, and the meshing system reads chunk data to
 //! build render geometry. Dirty chunks are flagged for remeshing on change.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::block::BlockId;
 
@@ -141,6 +141,7 @@ pub struct World {
     chunks: HashMap<ChunkPos, Chunk>,
     cached_chunks: HashMap<ChunkPos, Chunk>,
     dirty_chunks: Vec<ChunkPos>,
+    persistent_chunks: HashSet<ChunkPos>,
 }
 
 impl World {
@@ -156,6 +157,7 @@ impl World {
             chunks: HashMap::new(),
             cached_chunks: HashMap::new(),
             dirty_chunks: Vec::new(),
+            persistent_chunks: HashSet::new(),
         }
     }
 
@@ -203,6 +205,7 @@ impl World {
             c
         });
         chunk.set_block(lx, ly, lz, id);
+        self.persistent_chunks.insert(cp);
 
         if !self.dirty_chunks.contains(&cp) {
             self.dirty_chunks.push(cp);
@@ -240,7 +243,23 @@ impl World {
         chunk.clear_dirty();
         self.cached_chunks.remove(&pos);
         self.chunks.insert(pos, chunk);
+        self.persistent_chunks.insert(pos);
         self.dirty_chunks.retain(|dirty| *dirty != pos);
+    }
+
+    /// Inserts reproducible generated terrain without adding it to the save payload.
+    pub fn insert_generated_chunk(&mut self, mut chunk: Chunk) {
+        let pos = chunk.pos();
+        chunk.clear_dirty();
+        self.cached_chunks.remove(&pos);
+        self.chunks.insert(pos, chunk);
+        self.persistent_chunks.remove(&pos);
+        self.dirty_chunks.retain(|dirty| *dirty != pos);
+    }
+
+    /// Marks currently generated terrain as reproducible rather than player-authored.
+    pub fn clear_persistent_chunks(&mut self) {
+        self.persistent_chunks.clear();
     }
 
     /// Removes a loaded chunk and returns it.
@@ -265,9 +284,18 @@ impl World {
         self.chunks.values()
     }
 
-    /// Returns generated chunks that should be persisted, including unloaded cache entries.
+    /// Returns saved or player-modified chunks, including unloaded cache entries.
     pub fn persistent_chunks(&self) -> impl Iterator<Item = &Chunk> {
-        self.chunks.values().chain(self.cached_chunks.values())
+        self.chunks
+            .iter()
+            .filter(|(pos, _)| self.persistent_chunks.contains(pos))
+            .map(|(_, chunk)| chunk)
+            .chain(
+                self.cached_chunks
+                    .iter()
+                    .filter(|(pos, _)| self.persistent_chunks.contains(pos))
+                    .map(|(_, chunk)| chunk),
+            )
     }
 
     /// Returns a loaded chunk by position.
@@ -321,6 +349,7 @@ impl World {
             c
         });
         chunk.set_property(lx, ly, lz, prop_idx, value_idx);
+        self.persistent_chunks.insert(cp);
 
         if !self.dirty_chunks.contains(&cp) {
             self.dirty_chunks.push(cp);
@@ -410,6 +439,21 @@ mod tests {
         assert!(!w.is_chunk_cached(pos));
         assert_eq!(w.cached_chunk_count(), 0);
         assert_eq!(w.get_block(block_pos), block);
+    }
+
+    #[test]
+    fn only_saved_or_player_modified_chunks_are_persistent() {
+        let mut world = World::new();
+        world.insert_generated_chunk(Chunk::new(ChunkPos(0, 0)));
+        assert_eq!(world.persistent_chunks().count(), 0);
+
+        world.set_block(BlockPos(1, 2, 3), BlockId("stone".to_string()));
+        assert_eq!(world.persistent_chunks().count(), 1);
+        assert!(world.unload_chunk(ChunkPos(0, 0)));
+        assert_eq!(world.persistent_chunks().count(), 1);
+
+        world.insert_chunk(Chunk::new(ChunkPos(1, 0)));
+        assert_eq!(world.persistent_chunks().count(), 2);
     }
 
     #[test]

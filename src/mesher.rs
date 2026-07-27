@@ -32,7 +32,7 @@ fn face_visible(current: &BlockId, neighbor: Option<&BlockId>) -> bool {
     neighbor.0.is_empty() || (is_transparent(neighbor) && neighbor != current)
 }
 
-fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u16>, off: &mut u16, q: Quad) {
+fn push_quad(verts: &mut Vec<Vertex>, inds: &mut Vec<u32>, off: &mut u32, q: Quad) {
     verts.extend_from_slice(&q.vertices);
     let ao = q.vertices.map(|v| v.ao);
     if ao[0] + ao[2] > ao[1] + ao[3] {
@@ -258,7 +258,7 @@ pub struct MeshData {
 
 pub struct MeshLayer {
     pub vertices: Vec<Vertex>,
-    pub indices: Vec<u16>,
+    pub indices: Vec<u32>,
 }
 
 /// Meshes a single chunk using per-face texture UVs from block models.
@@ -276,10 +276,10 @@ pub fn mesh_chunk(
     let chunk_origin_z = chunk.pos().1 as f32 * SZ as f32;
     let mut opaque_verts = Vec::new();
     let mut opaque_inds = Vec::new();
-    let mut opaque_off: u16 = 0;
+    let mut opaque_off: u32 = 0;
     let mut transparent_verts = Vec::new();
     let mut transparent_inds = Vec::new();
-    let mut transparent_off: u16 = 0;
+    let mut transparent_off: u32 = 0;
     let chunk_block_x = chunk.pos().0 * SX as i32;
     let chunk_block_z = chunk.pos().1 * SZ as i32;
     let biome_cache = std::array::from_fn::<_, { SX * SZ }, _>(|i| {
@@ -522,8 +522,8 @@ struct Quad {
 
 fn push_crossed_sapling(
     verts: &mut Vec<Vertex>,
-    inds: &mut Vec<u16>,
-    off: &mut u16,
+    inds: &mut Vec<u32>,
+    off: &mut u32,
     x: f32,
     y: f32,
     z: f32,
@@ -694,5 +694,46 @@ fn quad(
                 tint,
             },
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dense_edited_chunks_use_indices_beyond_u16() {
+        let mut world = World::with_seed(12345);
+        for y in 0..SY as i32 {
+            for z in 0..SZ as i32 {
+                for x in 0..SX as i32 {
+                    if (x + y + z) % 2 == 0 {
+                        world.set_block(BlockPos(x, y, z), BlockId("stone".to_string()));
+                    }
+                }
+            }
+        }
+        let model = BlockModel {
+            faces: std::array::from_fn(|_| "block/stone".to_string()),
+        };
+        let models = HashMap::from([("stone".to_string(), model)]);
+        let atlas = HashMap::from([("block/stone".to_string(), [0.0, 0.0, 1.0, 1.0])]);
+        let chunk = world.chunk(crate::world::ChunkPos(0, 0)).unwrap();
+        let mesh = mesh_chunk(
+            chunk,
+            &world,
+            &BiomeSource::demo(),
+            &NoiseSettings::demo(),
+            &models,
+            &atlas,
+        );
+
+        assert!(mesh.opaque.vertices.len() > u16::MAX as usize);
+        assert!(
+            mesh.opaque
+                .indices
+                .iter()
+                .any(|index| *index > u16::MAX as u32)
+        );
     }
 }

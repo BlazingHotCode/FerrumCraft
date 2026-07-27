@@ -26,6 +26,7 @@ mod world;
 mod worldgen;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -76,7 +77,7 @@ const MAX_STACK_SIZE: u32 = 64;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
-const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 16;
+const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
 const DEMO_WORLD_SEED: u64 = 12_345;
 const DEMO_SPAWN_CHUNK_RADIUS: i32 = 1;
 const CHUNKS_GENERATED_PER_TICK: usize = 1;
@@ -87,9 +88,9 @@ const UNLOAD_MARGIN_CHUNKS: i32 = 2;
 const CLASSIC_WORLD_SIZE: i32 = 512;
 const CLASSIC_WORLD_CHUNKS: i32 = CLASSIC_WORLD_SIZE / world::CHUNK_SIZE_X as i32;
 const CLASSIC_ACTION_INTERVAL: f32 = 0.25;
-const CLASSIC_SAVE_VERSION: u32 = 2;
+const CLASSIC_SAVE_VERSION: u32 = 3;
 const CLASSIC_FAR_PLANES: [f32; 4] = [1024.0, 256.0, 64.0, 16.0];
-const CLASSIC_CHUNK_RADII: [i32; 4] = [16, 16, 4, 1];
+const CLASSIC_CHUNK_RADII: [i32; 4] = [8, 8, 4, 1];
 const WATER_LEVEL_PROPERTY: u8 = 0;
 const WATER_SOURCE_LEVEL: u8 = 0;
 const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
@@ -607,7 +608,7 @@ impl App {
             }
 
             let pos = generated.pos;
-            self.world.insert_chunk(generated.chunk);
+            self.world.insert_generated_chunk(generated.chunk);
             self.set_chunk_mesh_from_data(pos, generated.mesh);
             self.queue_chunk_mesh_rebuild(world::ChunkPos(pos.0 + 1, pos.1));
             self.queue_chunk_mesh_rebuild(world::ChunkPos(pos.0 - 1, pos.1));
@@ -2048,6 +2049,16 @@ mod early_classic_tests {
         assert_eq!(target.block_pos, world::BlockPos(8, 20, 10));
         assert_eq!(target.place_pos, world::BlockPos(8, 20, 9));
     }
+
+    #[test]
+    fn save_version_is_read_from_header_without_parsing_chunks() {
+        let header = r#"{
+            "format_version": 3,
+            "seed": 12345,
+            "chunks": ["#;
+        assert_eq!(saved_format_version(header), Some(3));
+        assert_eq!(saved_format_version("{}"), None);
+    }
 }
 
 fn start_chunk_generation_worker(
@@ -2157,7 +2168,7 @@ fn start_mesh_generation_worker(
 
                     let mut snapshot = world::World::with_seed(seed);
                     for chunk in job.chunks {
-                        snapshot.insert_chunk(chunk);
+                        snapshot.insert_generated_chunk(chunk);
                     }
 
                     if let Some(chunk) = snapshot.chunk(job.pos) {
@@ -2353,6 +2364,7 @@ fn create_demo_world(
             chunk_pos,
         );
     }
+    world.clear_persistent_chunks();
 
     world
 }
@@ -2398,6 +2410,24 @@ fn save_game(
 
 fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
     let path = save_path();
+    let mut header = String::new();
+    let mut file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::warn!(target: "save", "Failed to read save {:?}: {error}", path);
+            return None;
+        }
+    };
+    if let Err(error) = (&mut file).take(1024).read_to_string(&mut header) {
+        log::warn!(target: "save", "Failed to read save header {:?}: {error}", path);
+        return None;
+    }
+    if saved_format_version(&header) != Some(CLASSIC_SAVE_VERSION) {
+        log::info!(target: "save", "Ignoring incompatible save format");
+        return None;
+    }
+
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
@@ -2419,11 +2449,6 @@ fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
         log::warn!(target: "save", "Ignoring save with seed {} for world seed {}", save.seed, world.seed());
         return None;
     }
-    if save.format_version != CLASSIC_SAVE_VERSION {
-        log::info!(target: "save", "Ignoring pre-Classic-format save");
-        return None;
-    }
-
     for saved_chunk in save.chunks {
         let Some(blocks) = decode_block_runs(&saved_chunk.runs) else {
             log::warn!(target: "save", "Skipping malformed chunk {:?}", saved_chunk.pos);
@@ -2454,6 +2479,16 @@ fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
 
     log::info!(target: "save", "Loaded world from {:?}", path);
     Some(save.player)
+}
+
+fn saved_format_version(header: &str) -> Option<u32> {
+    let marker = "\"format_version\"";
+    let value = header.split_once(marker)?.1.split_once(':')?.1.trim_start();
+    let digits = value
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.parse().ok()
 }
 
 fn encode_block_runs(blocks: &[block::BlockId; world::CHUNK_VOLUME]) -> Vec<SaveBlockRun> {
