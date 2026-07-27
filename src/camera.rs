@@ -115,7 +115,12 @@ impl FirstPersonCamera {
     }
 
     fn view_matrix(&self) -> Mat4 {
-        Mat4::look_to_rh(self.position, self.forward(), Vec3::Y)
+        let forward = self.forward();
+        Mat4::look_to_rh(
+            self.position,
+            forward,
+            self.yaw_right().cross(forward).normalize(),
+        )
     }
 
     fn projection_matrix(&self) -> Mat4 {
@@ -131,4 +136,34 @@ impl FirstPersonCamera {
 
 fn aspect(width: u32, height: u32) -> f32 {
     width.max(1) as f32 / height.max(1) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_projection_stays_finite_when_looking_straight_down() {
+        let mut camera = FirstPersonCamera::new(1280, 720);
+        camera.pitch = -MAX_PITCH;
+
+        assert!(
+            camera
+                .view_projection()
+                .to_cols_array()
+                .into_iter()
+                .all(f32::is_finite)
+        );
+    }
+
+    #[test]
+    fn camera_up_remains_orthogonal_at_vertical_pitch() {
+        let mut camera = FirstPersonCamera::new(1280, 720);
+        camera.pitch = -MAX_PITCH;
+        let forward = camera.forward();
+        let up = camera.yaw_right().cross(forward).normalize();
+
+        assert!(forward.dot(up).abs() < 1.0e-5);
+        assert!((up.length() - 1.0).abs() < 1.0e-5);
+    }
 }

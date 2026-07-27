@@ -81,6 +81,7 @@ const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 8;
 const DEMO_WORLD_SEED: u64 = 12_345;
 const DEMO_SPAWN_CHUNK_RADIUS: i32 = 1;
 const CHUNKS_GENERATED_PER_TICK: usize = 1;
+const MAX_PENDING_CHUNK_GENERATIONS: usize = 2;
 const GENERATED_CHUNKS_INTEGRATED_PER_TICK: usize = 1;
 const GENERATED_MESHES_INTEGRATED_PER_TICK: usize = 1;
 const CHUNK_MESH_REBUILDS_PER_TICK: usize = 1;
@@ -533,6 +534,9 @@ impl App {
     }
 
     fn generate_missing_chunks_around(&mut self, center_chunk: world::ChunkPos) -> usize {
+        if self.pending_chunk_generations.len() >= MAX_PENDING_CHUNK_GENERATIONS {
+            return 0;
+        }
         let mut requested = 0;
         let radius = self.render_distance_chunks.max(0);
 
@@ -610,10 +614,6 @@ impl App {
             let pos = generated.pos;
             self.world.insert_generated_chunk(generated.chunk);
             self.set_chunk_mesh_from_data(pos, generated.mesh);
-            self.queue_chunk_mesh_rebuild(world::ChunkPos(pos.0 + 1, pos.1));
-            self.queue_chunk_mesh_rebuild(world::ChunkPos(pos.0 - 1, pos.1));
-            self.queue_chunk_mesh_rebuild(world::ChunkPos(pos.0, pos.1 + 1));
-            self.queue_chunk_mesh_rebuild(world::ChunkPos(pos.0, pos.1 - 1));
             integrated += 1;
         }
 
@@ -2077,7 +2077,7 @@ fn start_chunk_generation_worker(
     let (result_tx, result_rx) = mpsc::channel::<GeneratedChunk>();
 
     let request_rx = Arc::new(Mutex::new(request_rx));
-    for worker_index in 0..worker_count() {
+    for worker_index in 0..1 {
         let request_rx = Arc::clone(&request_rx);
         let result_tx = result_tx.clone();
         let feature_types = feature_types.clone();
@@ -2149,7 +2149,7 @@ fn start_mesh_generation_worker(
     let (result_tx, result_rx) = mpsc::channel::<GeneratedMesh>();
 
     let request_rx = Arc::new(Mutex::new(request_rx));
-    for worker_index in 0..worker_count() {
+    for worker_index in 0..worker_count().min(2) {
         let request_rx = Arc::clone(&request_rx);
         let result_tx = result_tx.clone();
         let model_map = model_map.clone();
