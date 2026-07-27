@@ -51,6 +51,11 @@ fn initialize_at(app_root: &Path, bundle_root: &Path) -> io::Result<()> {
     let marker = app_root.join(".resources-version");
     let installed_version = std::fs::read_to_string(&marker).unwrap_or_default();
     if installed_version.trim() != RESOURCE_VERSION {
+        for directory in [app_root.join("assets"), app_root.join("data")] {
+            if directory.exists() {
+                std::fs::remove_dir_all(directory)?;
+            }
+        }
         copy_tree(&bundle_root.join("assets"), &app_root.join("assets"))?;
         copy_tree(&bundle_root.join("data"), &app_root.join("data"))?;
         std::fs::write(marker, RESOURCE_VERSION)?;
@@ -109,6 +114,11 @@ mod tests {
         );
         assert!(app.join("saves").is_dir());
         assert!(app.join("logs").is_dir());
+
+        std::fs::write(app.join("assets/stale.txt"), "stale").unwrap();
+        std::fs::write(app.join(".resources-version"), "older").unwrap();
+        initialize_at(&app, &bundle).unwrap();
+        assert!(!app.join("assets/stale.txt").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
