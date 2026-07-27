@@ -3410,7 +3410,7 @@ fn main() {
     let [spawn_x, spawn_y, spawn_z] = classic_terrain.spawn();
     let classic_spawn_position = Vec3::new(
         spawn_x as f32 + 0.5,
-        spawn_y as f32 + PLAYER_EYE_HEIGHT,
+        (spawn_y - 1) as f32 + PLAYER_EYE_HEIGHT,
         spawn_z as f32 + 0.5,
     );
     let spawn_chunk = world::BlockPos(spawn_x, 0, spawn_z).chunk_pos();

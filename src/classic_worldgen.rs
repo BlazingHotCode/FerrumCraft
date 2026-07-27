@@ -43,7 +43,11 @@ impl ClassicTerrain {
     pub fn chunk(&self, pos: ChunkPos) -> Option<Chunk> {
         let min_x = pos.0 * CHUNK_SIZE_X as i32;
         let min_z = pos.1 * CHUNK_SIZE_Z as i32;
-        if min_x < 0 || min_z < 0 || min_x as usize >= self.width || min_z as usize >= self.length {
+        if min_x < 0
+            || min_z < 0
+            || min_x as usize + CHUNK_SIZE_X > self.width
+            || min_z as usize + CHUNK_SIZE_Z > self.length
+        {
             return None;
         }
 
@@ -372,8 +376,11 @@ impl Generator {
                 let mut z = origin_z;
                 for _ in 0..20 {
                     x += self.random.next_int(6) - self.random.next_int(6);
+                    if x < 0 {
+                        continue;
+                    }
                     z += self.random.next_int(6) - self.random.next_int(6);
-                    if x < 0 || z < 0 || x >= self.width as i32 || z >= self.length as i32 {
+                    if z < 0 || x >= self.width as i32 || z >= self.length as i32 {
                         continue;
                     }
                     let base_y = self.heights[x as usize + z as usize * self.width] + 1;
@@ -445,10 +452,10 @@ impl Generator {
                 }
                 y -= 1;
             }
-            y += 1;
-            spawn = [x, y, z];
-            if y > CHUNK_SIZE_Y as i32 / 2 {
-                break;
+            let spawn_y = y + 2;
+            spawn = [x, -100, z];
+            if spawn_y > CHUNK_SIZE_Y as i32 / 2 {
+                return [x, spawn_y, z];
             }
         }
         spawn
