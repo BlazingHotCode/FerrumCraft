@@ -1,5 +1,7 @@
 struct Camera {
     view_projection: mat4x4<f32>,
+    camera_position: vec4<f32>,
+    fog: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -30,6 +32,7 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
     @location(1) ao: f32,
     @location(2) tint: vec3<f32>,
+    @location(3) world_position: vec3<f32>,
 };
 
 @vertex
@@ -39,6 +42,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.tex_coords = input.uv;
     output.ao = input.ao;
     output.tint = input.tint;
+    output.world_position = input.position;
     return output;
 }
 
@@ -49,5 +53,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if (color.a < 0.01) {
         discard;
     }
-    return vec4<f32>(color.rgb * input.tint * input.ao, color.a);
+    let lit_color = color.rgb * input.tint * input.ao;
+    let fog_amount = clamp(distance(input.world_position, camera.camera_position.xyz) / camera.fog.x, 0.0, 1.0);
+    return vec4<f32>(mix(lit_color, vec3<f32>(0.92, 0.98, 1.0), fog_amount), color.a);
 }

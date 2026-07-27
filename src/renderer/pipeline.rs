@@ -15,6 +15,8 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_projection: [[f32; 4]; 4],
+    camera_position: [f32; 4],
+    fog: [f32; 4],
 }
 
 /// Collection of render pipelines used to draw a scene.
@@ -50,6 +52,8 @@ impl RenderPipelines {
             label: Some("Camera uniform buffer"),
             contents: bytemuck::bytes_of(&CameraUniform {
                 view_projection: glam::Mat4::IDENTITY.to_cols_array_2d(),
+                camera_position: [0.0; 4],
+                fog: [1024.0, 0.0, 0.0, 0.0],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -159,6 +163,13 @@ impl RenderPipelines {
             0,
             bytemuck::bytes_of(&CameraUniform {
                 view_projection: scene.view_projection().to_cols_array_2d(),
+                camera_position: [
+                    scene.camera_position().x,
+                    scene.camera_position().y,
+                    scene.camera_position().z,
+                    0.0,
+                ],
+                fog: [scene.fog_distance(), 0.0, 0.0, 0.0],
             }),
         );
 

@@ -232,9 +232,9 @@ impl NoiseSettings {
     /// Small demo settings that create readable low hills in the current 64-high world.
     pub fn demo() -> Self {
         Self {
-            base_height: 16,
-            height_scale: 15.0,
-            sea_level: 12,
+            base_height: 32,
+            height_scale: 16.0,
+            sea_level: 32,
             continentalness_scale: 0.015,
             erosion_scale: 0.035,
             peaks_valleys_scale: 0.055,
@@ -356,6 +356,23 @@ pub fn apply_surface_rules(
     }
 }
 
+/// Applies the biome-free dirt and grass surface used by Early Classic.
+pub fn apply_classic_surface_rules(world: &mut World, chunk_pos: ChunkPos, noise: &NoiseSettings) {
+    let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
+    let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
+    for lx in 0..CHUNK_SIZE_X as i32 {
+        for lz in 0..CHUNK_SIZE_Z as i32 {
+            let x = min_x + lx;
+            let z = min_z + lz;
+            let height = noise.sample(world, x, z).height;
+            world.set_block(BlockPos(x, height, z), BlockId("grass_block".to_string()));
+            for y in (height - 2).max(0)..height {
+                world.set_block(BlockPos(x, y, z), BlockId("dirt".to_string()));
+            }
+        }
+    }
+}
+
 /// Applies Early Classic one-block-thick sand and gravel beach patches.
 pub fn apply_beaches(world: &mut World, chunk_pos: ChunkPos, noise: &NoiseSettings) {
     let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
@@ -424,7 +441,7 @@ pub fn apply_sea_level_water(
                 continue;
             }
 
-            for y in sample.height + 1..=noise.sea_level {
+            for y in sample.height + 1..noise.sea_level {
                 let pos = BlockPos(x, y, z);
                 if world.get_block(pos) == BlockId::AIR {
                     world.set_block(pos, water.clone());
@@ -446,7 +463,7 @@ pub fn generate_surrounding_ocean(
     world.load_chunk(chunk_pos);
     let min_x = chunk_pos.0 * CHUNK_SIZE_X as i32;
     let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
-    let floor_y = (noise.sea_level - 4).max(1);
+    let floor_y = (noise.sea_level - 2).max(1);
     for lx in 0..CHUNK_SIZE_X as i32 {
         for lz in 0..CHUNK_SIZE_Z as i32 {
             let x = min_x + lx;
@@ -455,7 +472,7 @@ pub fn generate_surrounding_ocean(
             for y in 1..=floor_y {
                 world.set_block(BlockPos(x, y, z), stone.clone());
             }
-            for y in floor_y + 1..=noise.sea_level {
+            for y in floor_y + 1..noise.sea_level {
                 world.set_block(BlockPos(x, y, z), water.clone());
             }
         }
@@ -746,20 +763,25 @@ fn place_tree(world: &mut World, origin: BlockPos, config: &FeatureConfig) {
     ) {
         return;
     }
-    for y in 0..=*trunk_height + 2 {
+    let trunk_height = *trunk_height + world.seeded_range(origin.0, origin.2, 9_901, 0, 1);
+    for y in 0..=trunk_height {
         if world.get_block(BlockPos(origin.0, origin.1 + y, origin.2)) != BlockId::AIR {
             return;
         }
     }
-    for y in 0..*trunk_height {
+    world.set_block(
+        BlockPos(origin.0, origin.1 - 1, origin.2),
+        BlockId("dirt".to_string()),
+    );
+    for y in 0..trunk_height {
         world.set_block(BlockPos(origin.0, origin.1 + y, origin.2), log.clone());
     }
 
-    let canopy_y = origin.1 + trunk_height - 1;
-    for dy in 0..=1 {
-        for dx in -2i32..=2 {
-            for dz in -2i32..=2 {
-                if dx.abs() == 2 && dz.abs() == 2 {
+    let canopy_y = origin.1 + trunk_height - 2;
+    for dy in 0..=2 {
+        for dx in -1i32..=1 {
+            for dz in -1i32..=1 {
+                if dy == 2 && dx.abs() == 1 && dz.abs() == 1 {
                     continue;
                 }
                 let pos = BlockPos(origin.0 + dx, canopy_y + dy, origin.2 + dz);
@@ -767,12 +789,6 @@ fn place_tree(world: &mut World, origin: BlockPos, config: &FeatureConfig) {
                     world.set_block(pos, leaves.clone());
                 }
             }
-        }
-    }
-    for (dx, dz) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
-        let pos = BlockPos(origin.0 + dx, canopy_y + 2, origin.2 + dz);
-        if world.get_block(pos) == BlockId::AIR {
-            world.set_block(pos, leaves.clone());
         }
     }
 }
@@ -1069,9 +1085,12 @@ mod tests {
         );
         let x = 40 * CHUNK_SIZE_X as i32;
         assert_eq!(world.get_block(BlockPos(x, 0, 0)).0, "bedrock");
-        assert_eq!(world.get_block(BlockPos(x, noise.sea_level, 0)).0, "water");
         assert_eq!(
-            world.get_block(BlockPos(x, noise.sea_level + 1, 0)),
+            world.get_block(BlockPos(x, noise.sea_level - 1, 0)).0,
+            "water"
+        );
+        assert_eq!(
+            world.get_block(BlockPos(x, noise.sea_level, 0)),
             BlockId::AIR
         );
     }
@@ -1089,7 +1108,7 @@ mod tests {
                 let min_z = chunk_pos.1 * CHUNK_SIZE_Z as i32;
                 (0..CHUNK_SIZE_X as i32).any(|lx| {
                     (0..CHUNK_SIZE_Z as i32).any(|lz| {
-                        noise.sample(&world, min_x + lx, min_z + lz).height < noise.sea_level
+                        noise.sample(&world, min_x + lx, min_z + lz).height < noise.sea_level - 1
                     })
                 })
             })
@@ -1104,10 +1123,10 @@ mod tests {
         let (x, z, sample) = (0..CHUNK_SIZE_X as i32)
             .flat_map(|lx| (0..CHUNK_SIZE_Z as i32).map(move |lz| (min_x + lx, min_z + lz)))
             .map(|(x, z)| (x, z, noise.sample(&world, x, z)))
-            .find(|(_, _, sample)| sample.height < noise.sea_level)
+            .find(|(_, _, sample)| sample.height < noise.sea_level - 1)
             .expect("selected chunk should contain low terrain");
 
-        assert_eq!(world.get_block(BlockPos(x, noise.sea_level, z)), water);
+        assert_eq!(world.get_block(BlockPos(x, noise.sea_level - 1, z)), water);
         assert_ne!(world.get_block(BlockPos(x, sample.height, z)).0, "water");
     }
 

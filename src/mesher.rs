@@ -18,7 +18,10 @@ const WATER_LEVEL_PROPERTY: u8 = 0;
 const WATER_FALLING_LEVEL: u8 = 8;
 
 fn is_transparent(b: &BlockId) -> bool {
-    matches!(b.0.as_str(), "water" | "glass" | "oak_leaves")
+    matches!(
+        b.0.as_str(),
+        "water" | "glass" | "oak_leaves" | "oak_sapling"
+    )
 }
 
 fn face_visible(current: &BlockId, neighbor: Option<&BlockId>) -> bool {
@@ -322,6 +325,11 @@ pub fn mesh_chunk(
                 let world_y = y as i32;
                 let world_z = chunk_block_z + z as i32;
                 let biome = biome_cache[z * SX + x].as_str();
+                if block.0 == "oak_sapling" {
+                    let (uv, _) = face_uv(model, atlas_uv, Face::Front);
+                    push_crossed_sapling(verts, inds, off, fx, fy, fz, uv);
+                    continue;
+                }
                 let top_heights =
                     if block.0 == "water" && (y + 1 >= SY || blocks[idx + SLICE].0 != "water") {
                         water_top_heights(world, world_x, world_y, world_z)
@@ -512,6 +520,54 @@ struct Quad {
     vertices: [Vertex; 4],
 }
 
+fn push_crossed_sapling(
+    verts: &mut Vec<Vertex>,
+    inds: &mut Vec<u16>,
+    off: &mut u16,
+    x: f32,
+    y: f32,
+    z: f32,
+    uv: [f32; 4],
+) {
+    let [u0, v0, u1, v1] = uv;
+    let radius = 0.5 * std::f32::consts::SQRT_2;
+    for (dx, dz) in [(radius, radius), (radius, -radius)] {
+        push_quad(
+            verts,
+            inds,
+            off,
+            Quad {
+                vertices: [
+                    Vertex {
+                        position: [x + 0.5 - dx, y, z + 0.5 - dz],
+                        uv: [u0, v1],
+                        ao: 1.0,
+                        tint: [1.0; 3],
+                    },
+                    Vertex {
+                        position: [x + 0.5 - dx, y + 1.0, z + 0.5 - dz],
+                        uv: [u0, v0],
+                        ao: 1.0,
+                        tint: [1.0; 3],
+                    },
+                    Vertex {
+                        position: [x + 0.5 + dx, y + 1.0, z + 0.5 + dz],
+                        uv: [u1, v0],
+                        ao: 1.0,
+                        tint: [1.0; 3],
+                    },
+                    Vertex {
+                        position: [x + 0.5 + dx, y, z + 0.5 + dz],
+                        uv: [u1, v1],
+                        ao: 1.0,
+                        tint: [1.0; 3],
+                    },
+                ],
+            },
+        );
+    }
+}
+
 fn quad(
     dir: u8,
     ox: f32,
@@ -524,7 +580,7 @@ fn quad(
 ) -> Quad {
     let [u0, v0, u1, v1] = uv;
     let side_v = |height: f32| v1 - (v1 - v0) * height.clamp(0.0, 1.0);
-    let off = |v: [f32; 3]| [v[0] + ox - 8.5, v[1] + oy, v[2] + oz - 8.5];
+    let off = |v: [f32; 3]| [v[0] + ox, v[1] + oy, v[2] + oz];
     // Each face: (a,b,c,d) where triangles are a→b→c and a→c→d (CCW outside).
     // UV coords: bottom-left→[u0,v1], top-left→[u0,v0], top-right→[u1,v0], bottom-right→[u1,v1]
     let (verts, uvs): ([_; 4], [[f32; 2]; 4]) = match dir {

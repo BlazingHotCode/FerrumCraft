@@ -264,6 +264,20 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
             ),
         ),
         (
+            "cobblestone",
+            BlockDefinition::block(
+                "block.cobblestone",
+                true,
+                true,
+                false,
+                false,
+                1.5,
+                0,
+                BlockComponents::empty(),
+                &[],
+            ),
+        ),
+        (
             "bedrock",
             BlockDefinition::block(
                 "block.bedrock",
@@ -346,6 +360,25 @@ pub fn register_core_blocks() -> Registry<BlockDefinition> {
                 0.6,
                 0,
                 BlockComponents::empty(),
+                &[],
+            ),
+        ),
+        (
+            "oak_sapling",
+            BlockDefinition::block(
+                "block.sapling",
+                false,
+                false,
+                true,
+                false,
+                0.0,
+                0,
+                {
+                    let mut c = BlockComponents::empty();
+                    c.collision_shape = CollisionShape::Empty;
+                    c.drops_self = false;
+                    c
+                },
                 &[],
             ),
         ),

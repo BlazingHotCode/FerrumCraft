@@ -5,7 +5,7 @@
 
 use super::mesh::Mesh;
 use crate::world::ChunkPos;
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use std::collections::HashMap;
 
 /// Renderable world state for the current frame.
@@ -17,9 +17,12 @@ use std::collections::HashMap;
 pub struct Scene {
     clear_color: wgpu::Color,
     view_projection: Mat4,
+    camera_position: Vec3,
+    fog_distance: f32,
     opaque_meshes: HashMap<ChunkPos, Mesh>,
     transparent_meshes: HashMap<ChunkPos, Mesh>,
     destroy_overlay_mesh: Option<Mesh>,
+    classic_mob_mesh: Option<Mesh>,
 }
 
 impl Scene {
@@ -32,21 +35,30 @@ impl Scene {
         let _ = (device, material_layout);
         Self {
             clear_color: wgpu::Color {
-                r: 0.53,
-                g: 0.81,
-                b: 0.92,
+                r: 0.92,
+                g: 0.98,
+                b: 1.0,
                 a: 1.0,
             },
             view_projection,
+            camera_position: Vec3::ZERO,
+            fog_distance: 1024.0,
             opaque_meshes: HashMap::new(),
             transparent_meshes: HashMap::new(),
             destroy_overlay_mesh: None,
+            classic_mob_mesh: None,
         }
     }
 
     /// Updates the camera matrix used for rendering.
     pub fn set_view_projection(&mut self, view_projection: Mat4) {
         self.view_projection = view_projection;
+    }
+
+    pub fn set_camera(&mut self, view_projection: Mat4, position: Vec3, fog_distance: f32) {
+        self.view_projection = view_projection;
+        self.camera_position = position;
+        self.fog_distance = fog_distance;
     }
 
     /// Background color used when beginning the color pass.
@@ -59,9 +71,19 @@ impl Scene {
         self.view_projection
     }
 
+    pub fn camera_position(&self) -> Vec3 {
+        self.camera_position
+    }
+
+    pub fn fog_distance(&self) -> f32 {
+        self.fog_distance
+    }
+
     /// Meshes submitted for rendering this frame.
     pub fn opaque_meshes(&self) -> impl Iterator<Item = &Mesh> {
-        self.opaque_meshes.values()
+        self.opaque_meshes
+            .values()
+            .chain(self.classic_mob_mesh.iter())
     }
 
     /// Transparent meshes submitted for rendering after opaque geometry.
@@ -74,6 +96,10 @@ impl Scene {
     /// Inserts or removes the active block-breaking overlay mesh.
     pub fn set_destroy_overlay_mesh(&mut self, mesh: Option<Mesh>) {
         self.destroy_overlay_mesh = mesh;
+    }
+
+    pub fn set_classic_mob_mesh(&mut self, mesh: Option<Mesh>) {
+        self.classic_mob_mesh = mesh;
     }
 
     /// Replaces all scene meshes (e.g. when switching from debug shapes to chunks).

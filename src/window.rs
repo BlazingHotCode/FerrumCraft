@@ -26,7 +26,7 @@ impl Window {
     pub fn new(event_loop: &ActiveEventLoop) -> Result<Self, OsError> {
         let size = preferred_size(event_loop.primary_monitor().as_ref());
         let attributes = WinitWindow::default_attributes()
-            .with_title("FerrumCraft")
+            .with_title("Minecraft 0.0.14a_08")
             .with_inner_size(size);
 
         let inner = Arc::new(event_loop.create_window(attributes)?);

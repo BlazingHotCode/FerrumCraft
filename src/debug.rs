@@ -44,6 +44,10 @@ impl DebugOverlay {
         }
     }
 
+    pub fn classic_text(&self) -> String {
+        format!("0.0.14a_08\n{} fps, 0 chunk updates", self.fps)
+    }
+
     /// Updates player/camera diagnostics shown by F3.
     pub fn set_player_position(&mut self, position: Vec3) {
         self.player_position = position;
@@ -99,5 +103,5 @@ impl DebugOverlay {
 }
 
 fn chunk_coord(block_coord: f32) -> i32 {
-    ((block_coord + 8.5).floor() as i32).div_euclid(16)
+    (block_coord.floor() as i32).div_euclid(16)
 }

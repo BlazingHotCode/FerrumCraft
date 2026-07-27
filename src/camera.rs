@@ -6,8 +6,8 @@
 
 use glam::{Mat4, Vec3};
 
-const MOUSE_SENSITIVITY: f32 = 0.0025;
-const MAX_PITCH: f32 = 89.0_f32.to_radians();
+const MOUSE_SENSITIVITY: f32 = 0.15_f32.to_radians();
+const MAX_PITCH: f32 = 90.0_f32.to_radians();
 
 /// Camera used for Minecraft-style first-person rendering.
 #[derive(Debug)]
@@ -19,6 +19,7 @@ pub struct FirstPersonCamera {
     vertical_fov: f32,
     near: f32,
     far: f32,
+    invert_mouse: bool,
 }
 
 impl FirstPersonCamera {
@@ -32,7 +33,8 @@ impl FirstPersonCamera {
             aspect: aspect(width, height),
             vertical_fov: 70.0_f32.to_radians(),
             near: 0.05,
-            far: 256.0,
+            far: 1024.0,
+            invert_mouse: false,
         }
     }
 
@@ -44,7 +46,21 @@ impl FirstPersonCamera {
     /// Applies raw mouse movement to yaw/pitch orientation.
     pub fn apply_mouse_delta(&mut self, delta: (f64, f64)) {
         self.yaw += delta.0 as f32 * MOUSE_SENSITIVITY;
-        self.pitch = (self.pitch - delta.1 as f32 * MOUSE_SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
+        let vertical = if self.invert_mouse { -delta.1 } else { delta.1 };
+        self.pitch =
+            (self.pitch - vertical as f32 * MOUSE_SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
+    }
+
+    pub fn toggle_invert_mouse(&mut self) {
+        self.invert_mouse = !self.invert_mouse;
+    }
+
+    pub fn set_far_plane(&mut self, far: f32) {
+        self.far = far;
+    }
+
+    pub fn far_plane(&self) -> f32 {
+        self.far
     }
 
     /// Moves the camera by a world-space offset.

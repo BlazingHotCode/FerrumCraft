@@ -206,6 +206,109 @@ impl OverlayRenderer {
         pass.draw(0..vertices.len() as u32, 0..1);
     }
 
+    pub fn encode_classic_text(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        text: &str,
+    ) {
+        let vertices =
+            classic_text_vertices(&self.font, text, width.max(1) as f32, height.max(1) as f32);
+        self.encode_vertices(device, encoder, view, "Classic HUD text", &vertices);
+    }
+
+    pub fn encode_selected_block(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        selected: usize,
+    ) {
+        let width = width.max(1) as f32;
+        let height = height.max(1) as f32;
+        let cx = width - 30.0;
+        let cy = 30.0;
+        let color = classic_block_color(selected);
+        let mut vertices = Vec::with_capacity(18);
+        push_polygon(
+            &mut vertices,
+            [
+                [cx, cy - 13.0],
+                [cx + 16.0, cy - 5.0],
+                [cx, cy + 3.0],
+                [cx - 16.0, cy - 5.0],
+            ],
+            width,
+            height,
+            lighten(color, 1.18),
+        );
+        push_polygon(
+            &mut vertices,
+            [
+                [cx - 16.0, cy - 5.0],
+                [cx, cy + 3.0],
+                [cx, cy + 20.0],
+                [cx - 16.0, cy + 12.0],
+            ],
+            width,
+            height,
+            darken(color, 0.62),
+        );
+        push_polygon(
+            &mut vertices,
+            [
+                [cx, cy + 3.0],
+                [cx + 16.0, cy - 5.0],
+                [cx + 16.0, cy + 12.0],
+                [cx, cy + 20.0],
+            ],
+            width,
+            height,
+            darken(color, 0.82),
+        );
+        self.encode_vertices(device, encoder, view, "Classic selected block", &vertices);
+    }
+
+    fn encode_vertices(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        label: &str,
+        vertices: &[OverlayVertex],
+    ) {
+        if vertices.is_empty() {
+            return;
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+
     /// Draws a full-screen translucent color over the current frame.
     pub fn encode_tint(
         &self,
@@ -576,6 +679,87 @@ fn hotbar_item_color(index: usize) -> [f32; 4] {
         3 => [0.65, 0.45, 0.23, 1.0],
         _ => [0.65, 0.85, 0.92, 0.8],
     }
+}
+
+fn classic_block_color(index: usize) -> [f32; 4] {
+    match index {
+        0 => [0.48, 0.48, 0.48, 1.0],
+        1 => [0.45, 0.30, 0.18, 1.0],
+        2 => [0.38, 0.38, 0.38, 1.0],
+        3 => [0.66, 0.49, 0.28, 1.0],
+        4 => [0.30, 0.62, 0.20, 1.0],
+        5 => [0.39, 0.25, 0.12, 1.0],
+        6 => [0.28, 0.55, 0.20, 1.0],
+        7 => [0.76, 0.70, 0.48, 1.0],
+        _ => [0.50, 0.48, 0.45, 1.0],
+    }
+}
+
+fn lighten(mut color: [f32; 4], amount: f32) -> [f32; 4] {
+    for channel in &mut color[..3] {
+        *channel = (*channel * amount).min(1.0);
+    }
+    color
+}
+
+fn darken(mut color: [f32; 4], amount: f32) -> [f32; 4] {
+    for channel in &mut color[..3] {
+        *channel *= amount;
+    }
+    color
+}
+
+fn push_polygon(
+    vertices: &mut Vec<OverlayVertex>,
+    points: [[f32; 2]; 4],
+    width: f32,
+    height: f32,
+    color: [f32; 4],
+) {
+    for index in [0, 1, 2, 0, 2, 3] {
+        let [x, y] = points[index];
+        vertices.push(OverlayVertex {
+            position: [x / width * 2.0 - 1.0, 1.0 - y / height * 2.0],
+            color,
+        });
+    }
+}
+
+fn classic_text_vertices(font: &Font, text: &str, width: f32, height: f32) -> Vec<OverlayVertex> {
+    let mut vertices = Vec::new();
+    let mut x = 4.0;
+    let mut y = 4.0;
+    for ch in text.chars() {
+        if ch == '\n' {
+            x = 4.0;
+            y += 18.0;
+            continue;
+        }
+        push_glyph(
+            &mut vertices,
+            font,
+            ch,
+            x + 2.0,
+            y + 2.0,
+            2.0,
+            width,
+            height,
+            [0.0, 0.0, 0.0, 0.65],
+        );
+        push_glyph(
+            &mut vertices,
+            font,
+            ch,
+            x,
+            y,
+            2.0,
+            width,
+            height,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        x += 12.0;
+    }
+    vertices
 }
 
 fn draw_inventory_slot(

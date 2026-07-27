@@ -18,7 +18,7 @@ mod texture;
 
 use std::sync::Arc;
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use overlay::OverlayRenderer;
 use pipeline::{RenderPipelines, depth_format};
 use scene::Scene;
@@ -122,6 +122,11 @@ impl Renderer {
         self.scene.set_view_projection(view_projection);
     }
 
+    pub fn set_camera(&mut self, view_projection: Mat4, position: Vec3, fog_distance: f32) {
+        self.scene
+            .set_camera(view_projection, position, fog_distance);
+    }
+
     /// Bind group layout required for chunk mesh materials.
     pub fn material_layout(&self) -> &wgpu::BindGroupLayout {
         self.pipelines.material_layout()
@@ -182,20 +187,68 @@ impl Renderer {
         self.scene.set_destroy_overlay_mesh(Some(mesh));
     }
 
+    pub fn set_classic_mobs(&mut self, positions: &[Vec3]) {
+        if positions.is_empty() {
+            self.scene.set_classic_mob_mesh(None);
+            return;
+        }
+        let uv = self.atlas.uv("block/stone");
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for &position in positions {
+            push_mob_box(
+                &mut vertices,
+                &mut indices,
+                position + Vec3::new(-0.24, 1.35, -0.24),
+                Vec3::new(0.48, 0.48, 0.48),
+                uv,
+                [0.34, 0.68, 0.30],
+            );
+            push_mob_box(
+                &mut vertices,
+                &mut indices,
+                position + Vec3::new(-0.25, 0.70, -0.13),
+                Vec3::new(0.50, 0.65, 0.26),
+                uv,
+                [0.22, 0.48, 0.68],
+            );
+            for x in [-0.38, 0.25] {
+                push_mob_box(
+                    &mut vertices,
+                    &mut indices,
+                    position + Vec3::new(x, 0.68, -0.10),
+                    Vec3::new(0.13, 0.66, 0.20),
+                    uv,
+                    [0.34, 0.68, 0.30],
+                );
+            }
+            for x in [-0.22, 0.03] {
+                push_mob_box(
+                    &mut vertices,
+                    &mut indices,
+                    position + Vec3::new(x, 0.0, -0.11),
+                    Vec3::new(0.19, 0.70, 0.22),
+                    uv,
+                    [0.30, 0.28, 0.42],
+                );
+            }
+        }
+        self.scene.set_classic_mob_mesh(Some(Mesh::from_vertices(
+            &self.device,
+            self.pipelines.material_layout(),
+            "Classic mob mesh",
+            [1.0; 4],
+            &vertices,
+            &indices,
+        )));
+    }
+
     /// Encodes and presents one frame.
     pub fn render(
         &mut self,
-        debug_text: Option<&str>,
+        classic_text: &str,
         screen_tint: Option<[f32; 4]>,
-        hotbar_selected: usize,
-        hotbar_items: [Option<usize>; 9],
-        hotbar_counts: [u32; 9],
-        inventory_open: bool,
-        inventory_items: [Option<usize>; 27],
-        inventory_counts: [u32; 27],
-        carried_item: Option<usize>,
-        carried_count: u32,
-        mining_progress: f32,
+        selected_block: usize,
     ) -> Result<RenderStats, wgpu::SurfaceError> {
         self.atlas.update_animations(&self.queue);
 
@@ -227,46 +280,26 @@ impl Renderer {
             &view,
             self.config.width,
             self.config.height,
-            mining_progress,
+            0.0,
         );
 
-        self.overlay.encode_hotbar(
+        self.overlay.encode_selected_block(
             &self.device,
             &mut encoder,
             &view,
             self.config.width,
             self.config.height,
-            hotbar_selected,
-            hotbar_items,
-            hotbar_counts,
+            selected_block,
         );
 
-        if inventory_open {
-            self.overlay.encode_inventory(
-                &self.device,
-                &mut encoder,
-                &view,
-                self.config.width,
-                self.config.height,
-                hotbar_items,
-                hotbar_counts,
-                inventory_items,
-                inventory_counts,
-                carried_item,
-                carried_count,
-            );
-        }
-
-        if let Some(text) = debug_text {
-            self.overlay.encode(
-                &self.device,
-                &mut encoder,
-                &view,
-                self.config.width,
-                self.config.height,
-                text,
-            );
-        }
+        self.overlay.encode_classic_text(
+            &self.device,
+            &mut encoder,
+            &view,
+            self.config.width,
+            self.config.height,
+            classic_text,
+        );
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
@@ -278,14 +311,14 @@ fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<V
     let [u0, v0, u1, v1] = uv;
     let inflate = 0.002;
     let min = [
-        pos.0 as f32 - 8.5 - inflate,
+        pos.0 as f32 - inflate,
         pos.1 as f32 - inflate,
-        pos.2 as f32 - 8.5 - inflate,
+        pos.2 as f32 - inflate,
     ];
     let max = [
-        pos.0 as f32 - 8.5 + 1.0 + inflate,
+        pos.0 as f32 + 1.0 + inflate,
         pos.1 as f32 + 1.0 + inflate,
-        pos.2 as f32 - 8.5 + 1.0 + inflate,
+        pos.2 as f32 + 1.0 + inflate,
     ];
     let mut vertices = Vec::with_capacity(24);
     let mut indices = Vec::with_capacity(36);
@@ -341,6 +374,70 @@ fn destroy_overlay_geometry(pos: crate::world::BlockPos, uv: [f32; 4]) -> (Vec<V
     ]);
 
     (vertices, indices)
+}
+
+fn push_mob_box(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    min: Vec3,
+    size: Vec3,
+    uv: [f32; 4],
+    tint: [f32; 3],
+) {
+    let max = min + size;
+    let [u0, v0, u1, v1] = uv;
+    for corners in [
+        [
+            [max.x, min.y, min.z],
+            [max.x, max.y, min.z],
+            [max.x, max.y, max.z],
+            [max.x, min.y, max.z],
+        ],
+        [
+            [min.x, min.y, max.z],
+            [min.x, max.y, max.z],
+            [min.x, max.y, min.z],
+            [min.x, min.y, min.z],
+        ],
+        [
+            [min.x, max.y, min.z],
+            [min.x, max.y, max.z],
+            [max.x, max.y, max.z],
+            [max.x, max.y, min.z],
+        ],
+        [
+            [min.x, min.y, max.z],
+            [min.x, min.y, min.z],
+            [max.x, min.y, min.z],
+            [max.x, min.y, max.z],
+        ],
+        [
+            [min.x, min.y, max.z],
+            [max.x, min.y, max.z],
+            [max.x, max.y, max.z],
+            [min.x, max.y, max.z],
+        ],
+        [
+            [max.x, min.y, min.z],
+            [min.x, min.y, min.z],
+            [min.x, max.y, min.z],
+            [max.x, max.y, min.z],
+        ],
+    ] {
+        let base = vertices.len() as u16;
+        for (position, tex) in corners
+            .into_iter()
+            .zip([[u0, v1], [u0, v0], [u1, v0], [u1, v1]])
+        {
+            vertices.push(Vertex {
+                position,
+                uv: tex,
+                ao: 1.0,
+                tint,
+            });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
 }
 
 fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {

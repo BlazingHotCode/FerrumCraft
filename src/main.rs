@@ -48,39 +48,26 @@ use winit::keyboard::KeyCode;
 const GAME_TICK_RATE: u32 = 20;
 const FIXED_TIMESTEP: Duration = Duration::from_nanos(1_000_000_000 / GAME_TICK_RATE as u64);
 const MAX_FIXED_STEPS_PER_FRAME: u32 = 5;
-const WALK_SPEED: f32 = 4.3;
-const SPRINT_SPEED: f32 = 5.6;
-const CROUCH_SPEED: f32 = 1.3;
-const GROUND_ACCELERATION: f32 = 24.0;
-const AIR_ACCELERATION: f32 = 6.0;
-const GRAVITY: f32 = 28.0;
-const JUMP_SPEED: f32 = 8.4;
-const SWIM_SPEED: f32 = 2.2;
-const SWIM_VERTICAL_SPEED: f32 = 2.4;
-const WATER_ACCELERATION: f32 = 8.0;
-const WATER_DRAG: f32 = 2.4;
-const WATER_CURRENT_ACCELERATION: f32 = 1.2;
+const CLASSIC_GROUND_ACCELERATION: f32 = 0.1;
+const CLASSIC_AIR_ACCELERATION: f32 = 0.02;
+const CLASSIC_JUMP_VELOCITY: f32 = 0.42;
+const CLASSIC_GRAVITY: f32 = 0.08;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
 const PLAYER_CROUCH_EYE_HEIGHT: f32 = 1.35;
 const PLAYER_RADIUS: f32 = 0.3;
 const BLOCK_REACH: f32 = 5.0;
 const BLOCK_RAY_STEP: f32 = 0.05;
-const HOTBAR_BLOCKS: [&str; 14] = [
-    "dirt",
+const HOTBAR_BLOCKS: [&str; 9] = [
     "stone",
-    "oak_log",
+    "dirt",
+    "cobblestone",
     "oak_planks",
-    "glass",
+    "oak_sapling",
+    "oak_log",
+    "oak_leaves",
     "sand",
     "gravel",
-    "grass_block",
-    "oak_leaves",
-    "coal_ore",
-    "iron_ore",
-    "gold_ore",
-    "water",
-    "lava",
 ];
 const HOTBAR_SIZE: usize = 9;
 const ITEM_TYPE_COUNT: usize = HOTBAR_BLOCKS.len();
@@ -89,7 +76,7 @@ const MAX_STACK_SIZE: u32 = 64;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 const MIN_RENDER_DISTANCE_CHUNKS: i32 = 0;
 const MAX_RENDER_DISTANCE_CHUNKS: i32 = 16;
-const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 4;
+const DEFAULT_RENDER_DISTANCE_CHUNKS: i32 = 16;
 const DEMO_WORLD_SEED: u64 = 12_345;
 const DEMO_SPAWN_CHUNK_RADIUS: i32 = 1;
 const CHUNKS_GENERATED_PER_TICK: usize = 1;
@@ -97,8 +84,12 @@ const GENERATED_CHUNKS_INTEGRATED_PER_TICK: usize = 1;
 const GENERATED_MESHES_INTEGRATED_PER_TICK: usize = 1;
 const CHUNK_MESH_REBUILDS_PER_TICK: usize = 1;
 const UNLOAD_MARGIN_CHUNKS: i32 = 2;
-const WORLD_RENDER_OFFSET: f32 = 8.5;
-const EARLY_CLASSIC_LAND_RADIUS_CHUNKS: i32 = 32;
+const CLASSIC_WORLD_SIZE: i32 = 512;
+const CLASSIC_WORLD_CHUNKS: i32 = CLASSIC_WORLD_SIZE / world::CHUNK_SIZE_X as i32;
+const CLASSIC_ACTION_INTERVAL: f32 = 0.25;
+const CLASSIC_SAVE_VERSION: u32 = 2;
+const CLASSIC_FAR_PLANES: [f32; 4] = [1024.0, 256.0, 64.0, 16.0];
+const CLASSIC_CHUNK_RADII: [i32; 4] = [16, 16, 4, 1];
 const WATER_LEVEL_PROPERTY: u8 = 0;
 const WATER_SOURCE_LEVEL: u8 = 0;
 const WATER_MAX_HORIZONTAL_LEVEL: u8 = 7;
@@ -150,6 +141,10 @@ struct App {
     inventory_toggle_held: bool,
     mining_target: Option<world::BlockPos>,
     mining_progress: f32,
+    classic_build_mode: bool,
+    classic_action_cooldown: f32,
+    classic_spawn_position: Vec3,
+    classic_view_distance: usize,
     saved_player_position: Option<Vec3>,
     last_save: Instant,
     render_distance_chunks: i32,
@@ -157,6 +152,7 @@ struct App {
     water_tick: u64,
     pending_water_updates: VecDeque<(world::BlockPos, u64)>,
     queued_water_updates: HashMap<world::BlockPos, u64>,
+    classic_mobs: Vec<ClassicMob>,
 }
 
 struct GeneratedChunk {
@@ -173,6 +169,14 @@ struct MeshJob {
 struct GeneratedMesh {
     pos: world::ChunkPos,
     mesh: mesher::MeshData,
+}
+
+struct ClassicMob {
+    position: Vec3,
+    velocity: Vec3,
+    heading: f32,
+    turn_velocity: f32,
+    grounded: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -195,6 +199,8 @@ impl InventorySlot {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct SaveGame {
+    #[serde(default)]
+    format_version: u32,
     seed: u64,
     player: SavePlayer,
     chunks: Vec<SaveChunk>,
@@ -250,7 +256,7 @@ impl ApplicationHandler for App {
         camera.set_position(
             self.saved_player_position
                 .take()
-                .unwrap_or_else(|| spawn_eye_position(&self.world)),
+                .unwrap_or(self.classic_spawn_position),
         );
         let font = self
             .font
@@ -339,17 +345,9 @@ impl ApplicationHandler for App {
         }
 
         self.input.handle_window_event(&event);
-        if self.input.take_debug_overlay_toggle_requested() {
-            self.debug_overlay.toggle();
-        }
-        if self.input.is_f3_pressed() && self.input.was_key_just_pressed(KeyCode::KeyF) {
-            let delta = if self.input.is_shift_pressed() { -1 } else { 1 };
-            self.adjust_render_distance(delta);
-        }
-        if !self.inventory_open {
-            self.update_hotbar_selection();
-            self.update_hotbar_scroll();
-        }
+        self.update_hotbar_selection();
+        self.update_hotbar_scroll();
+        self.handle_classic_keys();
 
         match event {
             WindowEvent::CloseRequested => {
@@ -359,45 +357,18 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(false) => {
                 self.set_pointer_locked(false);
             }
-            WindowEvent::KeyboardInput { event, .. }
-                if matches!(
-                    event.physical_key,
-                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyE)
-                ) && event.state == winit::event::ElementState::Pressed
-                    && !self.inventory_toggle_held =>
-            {
-                self.inventory_toggle_held = true;
-                self.toggle_inventory();
-            }
-            WindowEvent::KeyboardInput { event, .. }
-                if matches!(
-                    event.physical_key,
-                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyE)
-                ) && event.state == winit::event::ElementState::Released =>
-            {
-                self.inventory_toggle_held = false;
-            }
             WindowEvent::KeyboardInput { .. }
                 if self
                     .input
                     .was_key_just_pressed(winit::keyboard::KeyCode::Escape) =>
             {
-                if self.inventory_open {
-                    self.toggle_inventory();
-                } else {
-                    self.set_pointer_locked(false);
-                }
+                self.set_pointer_locked(false);
             }
-            WindowEvent::MouseInput {
-                state: winit::event::ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
-            } if self.inventory_open => self.handle_inventory_click(),
             WindowEvent::MouseInput {
                 state: winit::event::ElementState::Pressed,
                 button: MouseButton::Left | MouseButton::Right,
                 ..
-            } if !self.inventory_open => {
+            } => {
                 self.set_pointer_locked(true);
             }
             WindowEvent::Resized(size) => {
@@ -407,7 +378,11 @@ impl ApplicationHandler for App {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                     if let Some(camera) = &self.camera {
-                        renderer.set_view_projection(camera.view_projection());
+                        renderer.set_camera(
+                            camera.view_projection(),
+                            camera.position(),
+                            camera.far_plane(),
+                        );
                     }
                 }
                 if let Some(window) = &self.window {
@@ -417,25 +392,12 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = &mut self.renderer {
                     let frame_start = Instant::now();
-                    let debug_text = self.debug_overlay.text();
+                    let classic_text = self.debug_overlay.classic_text();
                     let screen_tint = self
                         .camera
                         .as_ref()
                         .and_then(|camera| camera_water_tint(&self.world, camera.position()));
-                    renderer.set_destroy_overlay(self.mining_target, self.mining_progress);
-                    match renderer.render(
-                        debug_text.as_deref(),
-                        screen_tint,
-                        self.hotbar_selected,
-                        hotbar_render_slots(&self.hotbar_slots),
-                        hotbar_render_counts(&self.hotbar_slots),
-                        self.inventory_open,
-                        inventory_render_slots(&self.inventory_slots),
-                        inventory_render_counts(&self.inventory_slots),
-                        self.carried_slot.item,
-                        self.carried_slot.count,
-                        self.mining_progress,
-                    ) {
+                    match renderer.render(&classic_text, screen_tint, self.hotbar_selected) {
                         Ok(stats) => {
                             self.debug_overlay
                                 .set_render_stats(stats.visible_meshes, stats.culled_meshes);
@@ -475,7 +437,11 @@ impl ApplicationHandler for App {
             let delta = self.input.take_cursor_delta();
             if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
                 camera.apply_mouse_delta(delta);
-                renderer.set_view_projection(camera.view_projection());
+                renderer.set_camera(
+                    camera.view_projection(),
+                    camera.position(),
+                    camera.far_plane(),
+                );
                 self.debug_overlay.set_player_position(camera.position());
             }
         }
@@ -488,10 +454,7 @@ impl ApplicationHandler for App {
             .min(Duration::from_millis(100));
         self.last_frame_update = now;
 
-        if !self.inventory_open {
-            self.update_player_movement(frame_dt);
-            self.handle_block_interaction(frame_dt);
-        }
+        self.handle_block_interaction(frame_dt);
         self.run_fixed_updates();
         if self.last_save.elapsed() >= AUTOSAVE_INTERVAL {
             self.save_game();
@@ -521,13 +484,21 @@ impl App {
         }
     }
 
-    fn fixed_update(&mut self, _dt: Duration) {
+    fn fixed_update(&mut self, dt: Duration) {
         // Match Minecraft's 20 ticks-per-second simulation rate while rendering
         // stays independent and can run at a higher frame rate.
         self.water_tick = self.water_tick.wrapping_add(1);
+        if self.pointer_locked {
+            self.update_player_movement(dt);
+        }
+        self.update_classic_mobs();
         let mut camera_position = None;
         if let (Some(camera), Some(renderer)) = (&mut self.camera, &mut self.renderer) {
-            renderer.set_view_projection(camera.view_projection());
+            renderer.set_camera(
+                camera.view_projection(),
+                camera.position(),
+                camera.far_plane(),
+            );
             let position = camera.position();
             camera_position = Some(position);
             self.debug_overlay.set_player_position(position);
@@ -761,80 +732,74 @@ impl App {
             return;
         };
 
-        let dt = dt.as_secs_f32();
+        let _ = dt;
         let mut position = camera.position();
-        let in_water = player_in_water(&self.world, position, self.player_crouching);
-        position = update_player_crouch_pose(
-            &self.world,
-            position,
-            &mut self.player_crouching,
-            self.input.is_shift_pressed() && !in_water,
-        );
         let desired_direction = player_move_direction(camera, &self.input);
-        if in_water {
-            let target_horizontal = desired_direction * SWIM_SPEED;
-            let smoothing = 1.0 - (-WATER_ACCELERATION * dt).exp();
-            self.player_velocity.x += (target_horizontal.x - self.player_velocity.x) * smoothing;
-            self.player_velocity.z += (target_horizontal.z - self.player_velocity.z) * smoothing;
-
-            let target_vertical = if self.input.is_key_pressed(KeyCode::Space) {
-                SWIM_VERTICAL_SPEED
-            } else if self.input.is_shift_pressed() {
-                -SWIM_VERTICAL_SPEED
-            } else {
-                -0.15
-            };
-            self.player_velocity.y += (target_vertical - self.player_velocity.y) * smoothing;
-            self.player_velocity += water_current_at(&self.world, position, self.player_crouching)
-                * WATER_CURRENT_ACCELERATION
-                * dt;
-            self.player_velocity *= (-WATER_DRAG * dt).exp();
+        let fluid = player_fluid(&self.world, position);
+        if let Some(fluid) = fluid {
+            accelerate_horizontal(
+                &mut self.player_velocity,
+                desired_direction,
+                CLASSIC_AIR_ACCELERATION,
+            );
+            if self.input.is_key_pressed(KeyCode::Space) {
+                self.player_velocity.y += 0.04;
+            }
+            let (next_position, next_velocity, _) = move_player_with_collisions(
+                &self.world,
+                position,
+                self.player_velocity,
+                1.0,
+                false,
+                false,
+            );
+            position = next_position;
+            self.player_velocity = next_velocity;
+            self.player_velocity *= if fluid == "lava" { 0.5 } else { 0.8 };
+            self.player_velocity.y -= 0.02;
             self.player_grounded = false;
         } else {
-            let speed = if self.player_crouching {
-                CROUCH_SPEED
-            } else if self.input.is_key_pressed(KeyCode::ControlLeft)
-                || self.input.is_key_pressed(KeyCode::ControlRight)
-            {
-                SPRINT_SPEED
-            } else {
-                WALK_SPEED
-            };
-            let target_horizontal = desired_direction * speed;
             let acceleration = if self.player_grounded {
-                GROUND_ACCELERATION
+                CLASSIC_GROUND_ACCELERATION
             } else {
-                AIR_ACCELERATION
+                CLASSIC_AIR_ACCELERATION
             };
-            let smoothing = 1.0 - (-acceleration * dt).exp();
-            self.player_velocity.x += (target_horizontal.x - self.player_velocity.x) * smoothing;
-            self.player_velocity.z += (target_horizontal.z - self.player_velocity.z) * smoothing;
+            accelerate_horizontal(&mut self.player_velocity, desired_direction, acceleration);
 
             if self.player_grounded && self.input.is_key_pressed(KeyCode::Space) {
-                self.player_velocity.y = JUMP_SPEED;
+                self.player_velocity.y = CLASSIC_JUMP_VELOCITY;
                 self.player_grounded = false;
             }
-            self.player_velocity.y -= GRAVITY * dt;
+            let (next_position, next_velocity, grounded) = move_player_with_collisions(
+                &self.world,
+                position,
+                self.player_velocity,
+                1.0,
+                false,
+                self.player_grounded,
+            );
+            position = next_position;
+            self.player_velocity = next_velocity;
+            self.player_velocity.x *= 0.91;
+            self.player_velocity.z *= 0.91;
+            self.player_velocity.y = self.player_velocity.y * 0.98 - CLASSIC_GRAVITY;
+            if grounded {
+                self.player_velocity.x *= 0.6;
+                self.player_velocity.z *= 0.6;
+            }
+            self.player_grounded = grounded;
         }
-
-        let (next_position, next_velocity, grounded) = move_player_with_collisions(
-            &self.world,
-            position,
-            self.player_velocity,
-            dt,
-            self.player_crouching,
-            self.player_grounded,
-        );
-        position = next_position;
-        self.player_velocity = next_velocity;
-        self.player_grounded = grounded && !in_water;
 
         if let Some(camera) = &mut self.camera {
             camera.set_position(position);
         }
         if let Some(renderer) = &mut self.renderer {
             if let Some(camera) = &self.camera {
-                renderer.set_view_projection(camera.view_projection());
+                renderer.set_camera(
+                    camera.view_projection(),
+                    camera.position(),
+                    camera.far_plane(),
+                );
             }
         }
         self.debug_overlay.set_player_position(position);
@@ -848,91 +813,166 @@ impl App {
         }
     }
 
-    fn handle_block_interaction(&mut self, dt: Duration) {
-        if !self.pointer_locked {
-            self.reset_mining();
-            return;
-        }
-
-        let Some(target) = self.targeted_block() else {
-            self.reset_mining();
-            return;
-        };
-
-        let place_requested = self.input.take_mouse_click(MouseButton::Right);
-
-        if self.input.is_mouse_button_pressed(MouseButton::Left) {
-            self.update_mining(target.block_pos, dt);
-        } else {
-            self.reset_mining();
-        }
-
-        if place_requested {
-            self.reset_mining();
-            let selected = self.hotbar_slots[self.hotbar_selected];
-            let Some(item) = selected.item else {
-                return;
-            };
-            let previous = self.world.get_block(target.place_pos);
-            let previous_water_level = (previous.0 == "water").then(|| {
-                self.world
-                    .get_block_property(target.place_pos, WATER_LEVEL_PROPERTY)
-            });
-            if matches!(previous.0.as_str(), "" | "water") {
-                self.world.set_block(
-                    target.place_pos,
-                    block::BlockId(HOTBAR_BLOCKS[item].to_string()),
-                );
-                let collides = self.camera.as_ref().is_some_and(|camera| {
-                    player_collides(&self.world, camera.position(), self.player_crouching)
-                });
-                if collides {
-                    self.world.set_block(target.place_pos, previous);
-                    if let Some(level) = previous_water_level {
-                        self.world.set_block_property(
-                            target.place_pos,
-                            WATER_LEVEL_PROPERTY,
-                            level,
-                        );
-                    }
-                } else {
-                    remove_one_from_slot(&mut self.hotbar_slots[self.hotbar_selected]);
-                    self.queue_block_update_meshes(target.place_pos);
-                    self.settle_falling_blocks_above(target.place_pos);
-                    self.queue_water_updates_near(target.place_pos);
+    fn handle_classic_keys(&mut self) {
+        if self.input.was_key_just_pressed(KeyCode::KeyF) {
+            self.classic_view_distance =
+                (self.classic_view_distance + 1) % CLASSIC_FAR_PLANES.len();
+            self.render_distance_chunks = CLASSIC_CHUNK_RADII[self.classic_view_distance];
+            if let Some(camera) = &mut self.camera {
+                camera.set_far_plane(CLASSIC_FAR_PLANES[self.classic_view_distance]);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_camera(
+                        camera.view_projection(),
+                        camera.position(),
+                        camera.far_plane(),
+                    );
                 }
+            }
+        }
+        if self.input.was_key_just_pressed(KeyCode::KeyY)
+            && let Some(camera) = &mut self.camera
+        {
+            camera.toggle_invert_mouse();
+        }
+        if self.input.was_key_just_pressed(KeyCode::KeyR) {
+            self.respawn_player();
+        }
+        if self.input.was_key_just_pressed(KeyCode::Enter) {
+            if let Some(camera) = &self.camera {
+                self.classic_spawn_position = camera.position().floor();
+            }
+            self.respawn_player();
+        }
+        if self.input.was_key_just_pressed(KeyCode::KeyG) && self.classic_mobs.len() < 256 {
+            if let Some(camera) = &self.camera {
+                self.classic_mobs.push(ClassicMob {
+                    position: camera.position() - Vec3::Y * PLAYER_EYE_HEIGHT,
+                    velocity: Vec3::ZERO,
+                    heading: self.water_tick as f32 * 0.37,
+                    turn_velocity: 0.02,
+                    grounded: false,
+                });
             }
         }
     }
 
-    fn update_mining(&mut self, block_pos: world::BlockPos, dt: Duration) {
-        if self.mining_target != Some(block_pos) {
-            self.mining_target = Some(block_pos);
-            self.mining_progress = 0.0;
+    fn respawn_player(&mut self) {
+        if let Some(camera) = &mut self.camera {
+            camera.set_position(self.classic_spawn_position);
+        }
+        self.player_velocity = Vec3::ZERO;
+        self.player_grounded = false;
+    }
+
+    fn update_classic_mobs(&mut self) {
+        for (index, mob) in self.classic_mobs.iter_mut().enumerate() {
+            let noise = ((self.water_tick as f32 + index as f32 * 17.0) * 0.173).sin();
+            mob.turn_velocity = (mob.turn_velocity + noise * 0.08) * 0.99;
+            mob.heading += mob.turn_velocity;
+            let acceleration = if mob.grounded { 0.1 } else { 0.02 };
+            mob.velocity.x += mob.heading.cos() * acceleration;
+            mob.velocity.z += mob.heading.sin() * acceleration;
+            if mob.grounded && noise > 0.84 {
+                mob.velocity.y = 0.5;
+                mob.grounded = false;
+            }
+
+            let eye = mob.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let (next_eye, next_velocity, grounded) = move_player_with_collisions(
+                &self.world,
+                eye,
+                mob.velocity,
+                1.0,
+                false,
+                mob.grounded,
+            );
+            mob.position = next_eye - Vec3::Y * PLAYER_EYE_HEIGHT;
+            mob.velocity = next_velocity;
+            mob.velocity.x *= if grounded { 0.7 * 0.91 } else { 0.91 };
+            mob.velocity.z *= if grounded { 0.7 * 0.91 } else { 0.91 };
+            mob.velocity.y = mob.velocity.y * 0.98 - CLASSIC_GRAVITY;
+            mob.grounded = grounded;
         }
 
-        let block = self.world.get_block(block_pos);
-        let hardness = block_break_seconds(&block);
-        if hardness <= 0.0 {
-            self.break_block(block_pos, block);
-            return;
-        }
-
-        self.mining_progress += dt.as_secs_f32() / hardness;
-        if self.mining_progress >= 1.0 {
-            self.break_block(block_pos, block);
+        if let Some(renderer) = &mut self.renderer {
+            let positions: Vec<_> = self.classic_mobs.iter().map(|mob| mob.position).collect();
+            renderer.set_classic_mobs(&positions);
         }
     }
 
-    fn break_block(&mut self, block_pos: world::BlockPos, broken_block: block::BlockId) {
-        self.world.set_block(block_pos, block::BlockId::AIR.clone());
-        if let Some(item) = hotbar_slot_for_block(&block_drop(&broken_block)) {
-            add_item_to_inventory(&mut self.hotbar_slots, &mut self.inventory_slots, item, 1);
+    fn handle_block_interaction(&mut self, dt: Duration) {
+        if !self.pointer_locked {
+            self.classic_action_cooldown = 0.0;
+            return;
         }
-        self.queue_block_update_meshes(block_pos);
-        self.settle_falling_blocks_above(block_pos);
-        self.queue_water_updates_near(block_pos);
-        self.reset_mining();
+
+        if self.input.take_mouse_click(MouseButton::Right) {
+            self.classic_build_mode = !self.classic_build_mode;
+        }
+
+        if self.input.take_mouse_click(MouseButton::Middle)
+            && let Some(target) = self.targeted_block()
+        {
+            let picked = self.world.get_block(target.block_pos);
+            let picked = if picked.0 == "grass_block" {
+                block::BlockId("dirt".to_string())
+            } else {
+                picked
+            };
+            if let Some(slot) = hotbar_slot_for_block(&picked) {
+                self.hotbar_selected = slot;
+            }
+        }
+
+        if !self.input.is_mouse_button_pressed(MouseButton::Left) {
+            self.classic_action_cooldown = 0.0;
+            return;
+        }
+
+        self.classic_action_cooldown -= dt.as_secs_f32();
+        if self.classic_action_cooldown > 0.0 {
+            return;
+        }
+        self.classic_action_cooldown = CLASSIC_ACTION_INTERVAL;
+
+        let Some(target) = self.targeted_block() else {
+            return;
+        };
+
+        if self.classic_build_mode {
+            let previous = self.world.get_block(target.place_pos);
+            if !matches!(previous.0.as_str(), "" | "water" | "lava") {
+                return;
+            }
+            self.world.set_block(
+                target.place_pos,
+                block::BlockId(HOTBAR_BLOCKS[self.hotbar_selected].to_string()),
+            );
+            if HOTBAR_BLOCKS[self.hotbar_selected] != "oak_sapling"
+                && (self
+                    .camera
+                    .as_ref()
+                    .is_some_and(|camera| player_collides(&self.world, camera.position(), false))
+                    || self
+                        .classic_mobs
+                        .iter()
+                        .any(|mob| block_intersects_mob(target.place_pos, mob.position)))
+            {
+                self.world.set_block(target.place_pos, previous);
+                return;
+            }
+            self.queue_block_update_meshes(target.place_pos);
+            self.settle_falling_blocks_above(target.place_pos);
+            self.queue_water_updates_near(target.place_pos);
+        } else if self.world.get_block(target.block_pos).0 != "bedrock" {
+            self.world.set_block(
+                target.block_pos,
+                classic_break_replacement(target.block_pos),
+            );
+            self.queue_block_update_meshes(target.block_pos);
+            self.settle_falling_blocks_above(target.block_pos);
+            self.queue_water_updates_near(target.block_pos);
+        }
     }
 
     fn settle_falling_blocks_above(&mut self, changed_pos: world::BlockPos) {
@@ -1023,45 +1063,60 @@ impl App {
     }
 
     fn update_water_at(&mut self, pos: world::BlockPos) -> bool {
-        let block = self.world.get_block(pos);
-        let current_level = if block.0 == "water" {
-            Some(self.water_level(pos))
-        } else {
-            None
-        };
-
-        if current_level != Some(WATER_SOURCE_LEVEL) && self.can_generate_water_source_at(pos) {
-            self.set_water_level(pos, WATER_SOURCE_LEVEL);
+        let fluid = self.world.get_block(pos);
+        if !matches!(fluid.0.as_str(), "water" | "lava") {
+            return false;
+        }
+        let opposite = if fluid.0 == "water" { "lava" } else { "water" };
+        if horizontal_neighbors(pos)
+            .into_iter()
+            .chain((pos.1 > 0).then_some(world::BlockPos(pos.0, pos.1 - 1, pos.2)))
+            .any(|neighbor| self.world.get_block(neighbor).0 == opposite)
+        {
+            self.world
+                .set_block(pos, block::BlockId("stone".to_string()));
             self.queue_block_update_meshes(pos);
-            self.queue_water_updates_near(pos);
             return true;
         }
 
         let mut changed = false;
-        if let Some(level) = current_level {
-            let mut still_water = true;
-            if level != WATER_SOURCE_LEVEL {
-                if let Some(new_level) = self.recomputed_water_level(pos) {
-                    if new_level != level {
-                        self.set_water_level(pos, new_level);
-                        changed = true;
-                    }
-                } else {
-                    self.world.set_block(pos, block::BlockId::AIR.clone());
-                    still_water = false;
+        let mut moved_down = false;
+        let mut below = world::BlockPos(pos.0, pos.1 - 1, pos.2);
+        while below.1 >= 0 && self.world.get_block(below) == block::BlockId::AIR {
+            self.world.set_block(below, fluid.clone());
+            self.world
+                .set_block_property(below, WATER_LEVEL_PROPERTY, 1);
+            self.queue_block_update_meshes(below);
+            self.queue_water_update(below);
+            changed = true;
+            moved_down = true;
+            if fluid.0 == "lava" {
+                break;
+            }
+            below.1 -= 1;
+        }
+
+        if fluid.0 == "water" || !moved_down {
+            for neighbor in horizontal_neighbors(pos) {
+                let target = self.world.get_block(neighbor);
+                if target.0 == opposite {
+                    self.world
+                        .set_block(neighbor, block::BlockId("stone".to_string()));
+                    self.queue_block_update_meshes(neighbor);
+                    changed = true;
+                } else if target == block::BlockId::AIR {
+                    self.world.set_block(neighbor, fluid.clone());
+                    self.world
+                        .set_block_property(neighbor, WATER_LEVEL_PROPERTY, 1);
+                    self.queue_block_update_meshes(neighbor);
+                    self.queue_water_update(neighbor);
                     changed = true;
                 }
             }
-
-            if still_water && self.spread_water_from(pos) {
-                changed = true;
-            }
         }
 
-        if changed {
-            self.queue_block_update_meshes(pos);
-            self.queue_water_updates_near(pos);
-        }
+        self.world
+            .set_block_property(pos, WATER_LEVEL_PROPERTY, if changed { 1 } else { 0 });
         changed
     }
 
@@ -1549,9 +1604,9 @@ fn camera_chunk_pos(position: Vec3) -> world::ChunkPos {
 
 fn camera_block_pos(position: Vec3) -> world::BlockPos {
     world::BlockPos(
-        (position.x + WORLD_RENDER_OFFSET).floor() as i32,
+        position.x.floor() as i32,
         position.y.floor() as i32,
-        (position.z + WORLD_RENDER_OFFSET).floor() as i32,
+        position.z.floor() as i32,
     )
 }
 
@@ -1814,37 +1869,31 @@ mod water_tests {
             world::BlockPos(8, 10, 8),
             block::BlockId("water".to_string()),
         );
-        let center = Vec3::new(0.0, 10.5, 0.0);
+        let center = Vec3::new(8.5, 10.5, 8.5);
 
         assert!(water_block_at_point(&world, center).is_some());
-        assert!(water_block_at_point(&world, Vec3::new(0.0, 10.9, 0.0)).is_none());
+        assert!(water_block_at_point(&world, Vec3::new(8.5, 10.9, 8.5)).is_none());
         assert!(player_in_water(
             &world,
-            Vec3::new(0.0, 10.0 + PLAYER_EYE_HEIGHT, 0.0),
+            Vec3::new(8.5, 10.0 + PLAYER_EYE_HEIGHT, 8.5),
             false,
         ));
     }
 
     #[test]
-    fn water_current_points_toward_lower_level() {
+    fn classic_player_fluid_detects_water_and_lava() {
         let mut world = world::World::new();
-        let source = world::BlockPos(8, 10, 8);
-        let east = world::BlockPos(9, 10, 8);
-        world.set_block(source, block::BlockId("water".to_string()));
-        world.set_block(east, block::BlockId("water".to_string()));
-        world.set_block_property(east, WATER_LEVEL_PROPERTY, 1);
-        for solid in [
-            world::BlockPos(7, 10, 8),
-            world::BlockPos(8, 10, 7),
-            world::BlockPos(8, 10, 9),
-        ] {
-            world.set_block(solid, block::BlockId("stone".to_string()));
-        }
-
-        let current =
-            water_current_at(&world, Vec3::new(0.0, 10.5 + PLAYER_EYE_HEIGHT, 0.0), false);
-        assert!(current.x > 0.9);
-        assert!(current.z.abs() < 0.01);
+        let eye = Vec3::new(8.5, 10.0 + PLAYER_EYE_HEIGHT, 8.5);
+        world.set_block(
+            world::BlockPos(8, 10, 8),
+            block::BlockId("water".to_string()),
+        );
+        assert_eq!(player_fluid(&world, eye), Some("water"));
+        world.set_block(
+            world::BlockPos(8, 10, 8),
+            block::BlockId("lava".to_string()),
+        );
+        assert_eq!(player_fluid(&world, eye), Some("lava"));
     }
 }
 
@@ -1878,6 +1927,61 @@ mod early_classic_tests {
     fn bedrock_is_unbreakable_and_not_in_item_catalog() {
         assert!(block_break_seconds(&block::BlockId("bedrock".to_string())).is_infinite());
         assert!(hotbar_slot_for_block(&block::BlockId("bedrock".to_string())).is_none());
+    }
+
+    #[test]
+    fn creative_palette_matches_archived_client_order() {
+        assert_eq!(
+            HOTBAR_BLOCKS,
+            [
+                "stone",
+                "dirt",
+                "cobblestone",
+                "oak_planks",
+                "oak_sapling",
+                "oak_log",
+                "oak_leaves",
+                "sand",
+                "gravel",
+            ]
+        );
+    }
+
+    #[test]
+    fn huge_world_edges_are_solid_without_a_ceiling() {
+        let world = world::World::new();
+        let eye_y = 40.0 + PLAYER_EYE_HEIGHT;
+        assert!(player_collides(&world, Vec3::new(0.1, eye_y, 256.0), false));
+        assert!(player_collides(
+            &world,
+            Vec3::new(CLASSIC_WORLD_SIZE as f32 - 0.1, eye_y, 256.0),
+            false
+        ));
+        assert!(!player_collides(
+            &world,
+            Vec3::new(256.0, world::CHUNK_SIZE_Y as f32 + PLAYER_EYE_HEIGHT, 256.0),
+            false
+        ));
+    }
+
+    #[test]
+    fn breaking_ocean_level_edges_refills_them_with_water() {
+        assert_eq!(
+            classic_break_replacement(world::BlockPos(0, 30, 20)).0,
+            "water"
+        );
+        assert_eq!(
+            classic_break_replacement(world::BlockPos(511, 31, 20)).0,
+            "water"
+        );
+        assert_eq!(
+            classic_break_replacement(world::BlockPos(0, 32, 20)),
+            block::BlockId::AIR
+        );
+        assert_eq!(
+            classic_break_replacement(world::BlockPos(1, 30, 20)),
+            block::BlockId::AIR
+        );
     }
 }
 
@@ -2031,7 +2135,9 @@ fn generate_worldgen_chunk(
 ) {
     let id = |s: &str| block::BlockId(s.to_string());
 
-    if chunk_pos.0.abs().max(chunk_pos.1.abs()) > EARLY_CLASSIC_LAND_RADIUS_CHUNKS {
+    if !(0..CLASSIC_WORLD_CHUNKS).contains(&chunk_pos.0)
+        || !(0..CLASSIC_WORLD_CHUNKS).contains(&chunk_pos.1)
+    {
         worldgen::generate_surrounding_ocean(
             world,
             chunk_pos,
@@ -2044,11 +2150,10 @@ fn generate_worldgen_chunk(
     }
 
     worldgen::populate_chunk_noise(world, chunk_pos, noise_settings, id("stone"));
-    worldgen::apply_surface_rules(world, chunk_pos, noise_settings, biome_source);
+    worldgen::apply_classic_surface_rules(world, chunk_pos, noise_settings);
     worldgen::apply_beaches(world, chunk_pos, noise_settings);
     worldgen::apply_carvers(world, chunk_pos, noise_settings);
     worldgen::apply_sea_level_water(world, chunk_pos, noise_settings, id("water"));
-    worldgen::apply_bedrock_floor(world, chunk_pos, id("bedrock"));
 
     let coal_ore = worldgen::PlacedFeature {
         configured: worldgen::ConfiguredFeature {
@@ -2159,7 +2264,7 @@ fn generate_worldgen_chunk(
         chunk_pos,
     );
 
-    worldgen::place_structures_in_chunk(structure_sets, world, noise_settings, chunk_pos);
+    let _ = structure_sets;
 }
 
 fn create_demo_world(
@@ -2170,7 +2275,8 @@ fn create_demo_world(
 ) -> world::World {
     let mut world = world::World::with_seed(DEMO_WORLD_SEED);
 
-    let spawn_chunks = worldgen::spawn_area_chunks(world::ChunkPos(0, 0), DEMO_SPAWN_CHUNK_RADIUS);
+    let center = world::ChunkPos(CLASSIC_WORLD_CHUNKS / 2, CLASSIC_WORLD_CHUNKS / 2);
+    let spawn_chunks = worldgen::spawn_area_chunks(center, DEMO_SPAWN_CHUNK_RADIUS);
 
     for &chunk_pos in &spawn_chunks {
         generate_worldgen_chunk(
@@ -2198,6 +2304,7 @@ fn save_game(
     inventory_slots: [InventorySlot; INVENTORY_SIZE],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let save = SaveGame {
+        format_version: CLASSIC_SAVE_VERSION,
         seed: world.seed(),
         player: SavePlayer {
             position: [player_position.x, player_position.y, player_position.z],
@@ -2245,6 +2352,10 @@ fn load_saved_game(world: &mut world::World) -> Option<SavePlayer> {
 
     if save.seed != world.seed() {
         log::warn!(target: "save", "Ignoring save with seed {} for world seed {}", save.seed, world.seed());
+        return None;
+    }
+    if save.format_version != CLASSIC_SAVE_VERSION {
+        log::info!(target: "save", "Ignoring pre-Classic-format save");
         return None;
     }
 
@@ -2586,17 +2697,17 @@ fn water_flow_depth(level: u8) -> f32 {
 }
 
 fn spawn_eye_position(world: &world::World) -> Vec3 {
-    let block_x = 8;
-    let block_z = 8;
+    let block_x = CLASSIC_WORLD_SIZE / 2;
+    let block_z = CLASSIC_WORLD_SIZE / 2;
     let ground_y = (0..world::CHUNK_SIZE_Y as i32)
         .rev()
         .find(|y| is_player_solid_block(&world.get_block(world::BlockPos(block_x, *y, block_z))))
         .unwrap_or(16);
 
     Vec3::new(
-        block_x as f32 + 0.5 - WORLD_RENDER_OFFSET,
+        block_x as f32 + 0.5,
         ground_y as f32 + 1.0 + PLAYER_EYE_HEIGHT,
-        block_z as f32 + 0.5 - WORLD_RENDER_OFFSET,
+        block_z as f32 + 0.5,
     )
 }
 
@@ -2609,7 +2720,7 @@ fn raycast_block(world: &world::World, origin: Vec3, direction: Vec3) -> Option<
         let sample = origin + direction * distance;
         let block_pos = camera_block_pos(sample);
         let block = world.get_block(block_pos);
-        if is_targetable_block(&block) {
+        if is_targetable_block(&block) && classic_pick_volume_contains(origin, block_pos) {
             return Some(BlockTarget {
                 block_pos,
                 place_pos: previous,
@@ -2627,20 +2738,49 @@ fn raycast_block(world: &world::World, origin: Vec3, direction: Vec3) -> Option<
 fn player_move_direction(camera: &FirstPersonCamera, input: &InputState) -> Vec3 {
     let mut movement = Vec3::ZERO;
 
-    if input.is_key_pressed(KeyCode::KeyW) {
+    if input.is_key_pressed(KeyCode::KeyW) || input.is_key_pressed(KeyCode::ArrowUp) {
         movement += camera.yaw_forward();
     }
-    if input.is_key_pressed(KeyCode::KeyS) {
+    if input.is_key_pressed(KeyCode::KeyS) || input.is_key_pressed(KeyCode::ArrowDown) {
         movement -= camera.yaw_forward();
     }
-    if input.is_key_pressed(KeyCode::KeyA) {
+    if input.is_key_pressed(KeyCode::KeyA) || input.is_key_pressed(KeyCode::ArrowLeft) {
         movement -= camera.yaw_right();
     }
-    if input.is_key_pressed(KeyCode::KeyD) {
+    if input.is_key_pressed(KeyCode::KeyD) || input.is_key_pressed(KeyCode::ArrowRight) {
         movement += camera.yaw_right();
     }
 
     movement.try_normalize().unwrap_or(Vec3::ZERO)
+}
+
+fn accelerate_horizontal(velocity: &mut Vec3, direction: Vec3, acceleration: f32) {
+    velocity.x += direction.x * acceleration;
+    velocity.z += direction.z * acceleration;
+}
+
+fn player_fluid(world: &world::World, eye_position: Vec3) -> Option<&'static str> {
+    let feet_y = eye_position.y - PLAYER_EYE_HEIGHT;
+    for y in [
+        feet_y + 0.4,
+        feet_y + PLAYER_HEIGHT * 0.5,
+        eye_position.y - 0.4,
+    ] {
+        match world
+            .get_block(camera_block_pos(Vec3::new(
+                eye_position.x,
+                y,
+                eye_position.z,
+            )))
+            .0
+            .as_str()
+        {
+            "water" => return Some("water"),
+            "lava" => return Some("lava"),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn update_player_crouch_pose(
@@ -2724,12 +2864,20 @@ fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) ->
     };
     let height = if crouching { 1.5 } else { PLAYER_HEIGHT };
     let feet_y = eye_position.y - eye_height;
-    let min_x = eye_position.x + WORLD_RENDER_OFFSET - PLAYER_RADIUS;
-    let max_x = eye_position.x + WORLD_RENDER_OFFSET + PLAYER_RADIUS;
+    let min_x = eye_position.x - PLAYER_RADIUS;
+    let max_x = eye_position.x + PLAYER_RADIUS;
     let min_y = feet_y;
     let max_y = feet_y + height;
-    let min_z = eye_position.z + WORLD_RENDER_OFFSET - PLAYER_RADIUS;
-    let max_z = eye_position.z + WORLD_RENDER_OFFSET + PLAYER_RADIUS;
+    let min_z = eye_position.z - PLAYER_RADIUS;
+    let max_z = eye_position.z + PLAYER_RADIUS;
+
+    if min_x < 0.0
+        || max_x >= CLASSIC_WORLD_SIZE as f32
+        || min_z < 0.0
+        || max_z >= CLASSIC_WORLD_SIZE as f32
+    {
+        return true;
+    }
 
     for y in min_y.floor() as i32..=max_y.floor() as i32 {
         if !(0..world::CHUNK_SIZE_Y as i32).contains(&y) {
@@ -2748,11 +2896,53 @@ fn player_collides(world: &world::World, eye_position: Vec3, crouching: bool) ->
 }
 
 fn is_player_solid_block(block: &block::BlockId) -> bool {
-    !matches!(block.0.as_str(), "" | "water" | "lava" | "oak_leaves")
+    !matches!(block.0.as_str(), "" | "water" | "lava" | "oak_sapling")
 }
 
 fn is_targetable_block(block: &block::BlockId) -> bool {
-    !matches!(block.0.as_str(), "" | "water" | "lava")
+    !block.0.is_empty()
+}
+
+fn classic_pick_volume_contains(eye: Vec3, block: world::BlockPos) -> bool {
+    let feet_y = eye.y - PLAYER_EYE_HEIGHT;
+    let min = Vec3::new(
+        eye.x - PLAYER_RADIUS - 2.5,
+        feet_y - 2.5,
+        eye.z - PLAYER_RADIUS - 2.5,
+    );
+    let max = Vec3::new(
+        eye.x + PLAYER_RADIUS + 2.5,
+        feet_y + PLAYER_HEIGHT + 2.5,
+        eye.z + PLAYER_RADIUS + 2.5,
+    );
+    let block_min = Vec3::new(block.0 as f32, block.1 as f32, block.2 as f32);
+    let block_max = block_min + Vec3::ONE;
+    block_min.cmplt(max).all() && block_max.cmpgt(min).all()
+}
+
+fn classic_break_replacement(pos: world::BlockPos) -> block::BlockId {
+    let on_edge = pos.0 == 0
+        || pos.2 == 0
+        || pos.0 == CLASSIC_WORLD_SIZE - 1
+        || pos.2 == CLASSIC_WORLD_SIZE - 1;
+    if on_edge && (30..32).contains(&pos.1) {
+        block::BlockId("water".to_string())
+    } else {
+        block::BlockId::AIR.clone()
+    }
+}
+
+fn block_intersects_mob(block: world::BlockPos, mob_feet: Vec3) -> bool {
+    let block_min = Vec3::new(block.0 as f32, block.1 as f32, block.2 as f32);
+    let block_max = block_min + Vec3::ONE;
+    let mob_min = mob_feet - Vec3::new(PLAYER_RADIUS, 0.0, PLAYER_RADIUS);
+    let mob_max = mob_feet + Vec3::new(PLAYER_RADIUS, PLAYER_HEIGHT, PLAYER_RADIUS);
+    block_min.x < mob_max.x
+        && block_max.x > mob_min.x
+        && block_min.y < mob_max.y
+        && block_max.y > mob_min.y
+        && block_min.z < mob_max.z
+        && block_max.z > mob_min.z
 }
 
 fn settle_falling_column(
@@ -2956,6 +3146,7 @@ fn main() {
         .as_ref()
         .map(inventory_from_saved_player)
         .unwrap_or_default();
+    let classic_spawn_position = spawn_eye_position(&world);
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -2996,13 +3187,18 @@ fn main() {
         inventory_toggle_held: false,
         mining_target: None,
         mining_progress: 0.0,
+        classic_build_mode: false,
+        classic_action_cooldown: 0.0,
+        classic_spawn_position,
+        classic_view_distance: 0,
         saved_player_position,
         last_save: Instant::now(),
         render_distance_chunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
-        mesh_center_chunk: world::ChunkPos(0, 0),
+        mesh_center_chunk: world::ChunkPos(CLASSIC_WORLD_CHUNKS / 2, CLASSIC_WORLD_CHUNKS / 2),
         water_tick: 0,
         pending_water_updates: VecDeque::new(),
         queued_water_updates: HashMap::new(),
+        classic_mobs: Vec::new(),
     };
     event_loop.run_app(&mut app).expect("Event loop error");
 }
